@@ -9,6 +9,7 @@
 
 #include <expected>
 #include <filesystem>
+#include <span>
 #include <string>
 #include <vector>
 
@@ -29,6 +30,10 @@ public:
     [[nodiscard]] bool shaderSourcesChanged() const;
 
     void draw(const FrameParams& frame, gl::GpuTimer& timer);
+
+    // Disk temperature profile T / T_peak over u = sqrt((r - r_in) / (r_out - r_in)), u in [0, 1]
+    // (kerr::diskTemperatureProfile). Any number of samples; re-upload whenever spin, orbit or r_out change.
+    void setDiskProfile(std::span<const float> profile);
 
     [[nodiscard]] glm::ivec2 traceResolution() const { return m_radiance.size; }
 
@@ -57,6 +62,9 @@ private:
     Programs m_programs;
     gl::Buffer m_frameUniforms {gl::createBuffer()};
     gl::VertexArray m_emptyVao {gl::createVertexArray()};
+    gl::Texture m_blackbodyLut;            // linear sRGB radiance over log10 T, from bh::blackbodyRgb
+    gl::Texture m_diskProfile {};
+    int m_diskProfileSize {};
     RenderTarget m_radiance {};
     std::vector<RenderTarget> m_bloomLevels {}; // [0] is half the trace size, each next one half again
 };

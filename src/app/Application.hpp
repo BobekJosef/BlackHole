@@ -9,6 +9,7 @@
 
 #include <glm/glm.hpp>
 
+#include <optional>
 #include <string>
 
 namespace bh {
@@ -23,6 +24,7 @@ private:
     void handleInput();
     [[nodiscard]] FrameParams frameParams(glm::ivec2 framebufferSize, float time) const;
     void drawOverlays() const;
+    void updateDiskProfile();
     void reloadShaders();
     void pollShaderFiles(double now);
 
@@ -43,6 +45,15 @@ private:
     bool m_reloadKeyWasDown {};
     double m_smoothedFrameSeconds {1.0 / 60.0};
     double m_nextShaderPoll {};
+
+    // Inputs of the disk temperature profile last uploaded; empty before the first upload.
+    struct DiskProfileKey {
+        float spin {};
+        kerr::Orbit orbit {kerr::Orbit::PROGRADE};
+        float outerRadius {};
+        bool operator==(const DiskProfileKey&) const = default;
+    };
+    std::optional<DiskProfileKey> m_diskProfileKey {};
 };
 
 } // namespace bh

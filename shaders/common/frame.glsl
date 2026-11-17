@@ -22,16 +22,24 @@ layout(std140, binding = 0) uniform Frame {
     uint  uMaxSteps;
     uint  uFlags;            // FLAG_* bits
     uint  uDebugView;        // DEBUG_VIEW_*
+    float uDiskPeakTemperature; // K, maximum of the local (emitted) temperature
+    float uDiskBrightness;      // 1 / Y(peak temperature): unshifted peak has luminance 1 at 0 EV
+    float uDiskOrbitSign;       // +1 prograde, -1 retrograde gas
+    float uBlackbodyLogTMin;    // log10 T range of uBlackbody
+    float uBlackbodyLogTMax;
 };
 
 const uint FLAG_DISK  = 1u << 0;
 const uint FLAG_STARS = 1u << 1;
+const uint FLAG_DOPPLER = 1u << 2;
+const uint FLAG_GRAVITATIONAL_REDSHIFT = 1u << 3;
 
 // Must match bh::DebugView in src/render/FrameParams.hpp.
 const uint DEBUG_VIEW_NONE = 0u;
 const uint DEBUG_VIEW_STEPS = 1u;
 const uint DEBUG_VIEW_CONSTRAINT = 2u;
 const uint DEBUG_VIEW_FATE = 3u;
+const uint DEBUG_VIEW_REDSHIFT = 4u;
 
 bool hasFlag(uint flag)
 {

@@ -14,6 +14,9 @@ struct SceneSettings {
     // Accretion disk (inner edge is the ISCO)
     bool diskEnabled {true};
     float diskOuterRadius {20.0F};
+    float diskPeakTemperature {6500.0F}; // K; scales as (accretion rate / M^2)^(1/4)
+    bool dopplerShift {true};            // includes relativistic beaming
+    bool gravitationalRedshift {true};   // includes frame dragging
 
     // Background
     bool starsEnabled {true};

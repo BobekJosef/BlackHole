@@ -8,6 +8,11 @@ target_link_libraries(test_geodesic PRIVATE bh_physics)
 blackhole_configure_target(test_geodesic)
 add_test(NAME geodesic COMMAND test_geodesic)
 
+add_executable(test_disk test_disk.cpp)
+target_link_libraries(test_disk PRIVATE bh_physics)
+blackhole_configure_target(test_disk)
+add_test(NAME disk COMMAND test_disk)
+
 add_executable(test_shader_preprocessor test_shader_preprocessor.cpp)
 target_link_libraries(test_shader_preprocessor PRIVATE bh_shadertools)
 blackhole_configure_target(test_shader_preprocessor)

@@ -9,6 +9,8 @@ blackhole_configure_target(bh_shadertools)
 
 # Pure C++ physics (no OpenGL): unit-testable, and the CPU reference for the GPU code.
 add_library(bh_physics STATIC
+    physics/Blackbody.cpp
+    physics/Disk.cpp
     physics/Geodesic.cpp
     physics/Kerr.cpp
     physics/KerrSchild.cpp)

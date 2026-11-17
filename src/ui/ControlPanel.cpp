@@ -1,5 +1,6 @@
 #include "ui/ControlPanel.hpp"
 
+#include "physics/Disk.hpp"
 #include "physics/Kerr.hpp"
 
 #include <imgui.h>
@@ -12,8 +13,8 @@ namespace bh {
 namespace {
 
 constexpr std::array<const char*, 4> toneMapperNames {"AgX", "ACES (Hill fit)", "Exponential", "Clamp (none)"};
-constexpr std::array<const char*, 4> debugViewNames {"None", "Step count", "Constraint |H| / p^2",
-                                                     "Fate (captured/sky/disk/limit)"};
+constexpr std::array<const char*, 5> debugViewNames {"None", "Step count", "Constraint |H| / p^2",
+                                                     "Fate (captured/sky/disk/limit)", "Redshift g (disk)"};
 
 void drawRayTracingSettings(SceneSettings& settings)
 {
@@ -84,7 +85,7 @@ PanelActions drawControlPanel(SceneSettings& settings, const PanelInfo& info)
         return actions;
     }
 
-    ImGui::TextDisabled("Kerr geodesics; disk colour is a placeholder");
+    ImGui::TextDisabled("Kerr geodesics, Novikov-Thorne disk");
     if (!info.shaderError.empty()) { // on top, so it cannot scroll out of sight
         ImGui::PushStyleColor(ImGuiCol_Text, ImVec4 {1.0F, 0.4F, 0.4F, 1.0F});
         ImGui::TextWrapped("Shader error (previous shaders still active):\n%.*s",
@@ -104,6 +105,16 @@ PanelActions drawControlPanel(SceneSettings& settings, const PanelInfo& info)
     if (ImGui::CollapsingHeader("Accretion disk", ImGuiTreeNodeFlags_DefaultOpen)) {
         ImGui::Checkbox("Show disk", &settings.diskEnabled);
         ImGui::SliderFloat("Outer radius", &settings.diskOuterRadius, 10.0F, 60.0F, "%.1f M");
+        ImGui::SliderFloat("Peak temperature", &settings.diskPeakTemperature, 1000.0F, 50000.0F, "%.0f K",
+                           ImGuiSliderFlags_Logarithmic);
+        ImGui::SetItemTooltip("Maximum local temperature of the Novikov-Thorne disk, ~(accretion rate / M^2)^(1/4).");
+        ImGui::Checkbox("Doppler shift", &settings.dopplerShift);
+        ImGui::SetItemTooltip("Motion of the gas: blueshift and beaming on the approaching side.");
+        ImGui::SameLine();
+        ImGui::Checkbox("Gravitational", &settings.gravitationalRedshift);
+        ImGui::SetItemTooltip("Gravitational redshift and frame dragging.");
+        const double a {static_cast<double>(settings.spin)};
+        ImGui::Text("Flux peak at r = %.2f M", kerr::novikovThorneFluxPeakRadius(a, settings.diskOrbit));
     }
 
     if (ImGui::CollapsingHeader("Background", ImGuiTreeNodeFlags_DefaultOpen)) {

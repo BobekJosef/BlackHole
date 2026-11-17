@@ -11,6 +11,8 @@ namespace bh {
 
 inline constexpr std::uint32_t frameFlagDisk = 1U << 0U;  // FLAG_DISK
 inline constexpr std::uint32_t frameFlagStars = 1U << 1U; // FLAG_STARS
+inline constexpr std::uint32_t frameFlagDoppler = 1U << 2U;               // FLAG_DOPPLER
+inline constexpr std::uint32_t frameFlagGravitationalRedshift = 1U << 3U; // FLAG_GRAVITATIONAL_REDSHIFT
 
 inline constexpr unsigned frameUniformBinding = 0;
 
@@ -30,6 +32,11 @@ struct FrameUniforms {
     std::uint32_t maxSteps {};
     std::uint32_t flags {};
     std::uint32_t debugView {};
+    float diskPeakTemperature {};
+    float diskBrightness {};
+    float diskOrbitSign {};
+    float blackbodyLogTMin {};
+    float blackbodyLogTMax {};
 };
 
 static_assert(offsetof(FrameUniforms, cameraFrame) == 0);
@@ -47,6 +54,11 @@ static_assert(offsetof(FrameUniforms, escapeRadius) == 120);
 static_assert(offsetof(FrameUniforms, maxSteps) == 124);
 static_assert(offsetof(FrameUniforms, flags) == 128);
 static_assert(offsetof(FrameUniforms, debugView) == 132);
-static_assert(sizeof(FrameUniforms) == 136);
+static_assert(offsetof(FrameUniforms, diskPeakTemperature) == 136);
+static_assert(offsetof(FrameUniforms, diskBrightness) == 140);
+static_assert(offsetof(FrameUniforms, diskOrbitSign) == 144);
+static_assert(offsetof(FrameUniforms, blackbodyLogTMin) == 148);
+static_assert(offsetof(FrameUniforms, blackbodyLogTMax) == 152);
+static_assert(sizeof(FrameUniforms) == 156);
 
 } // namespace bh

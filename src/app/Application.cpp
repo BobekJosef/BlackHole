@@ -1,6 +1,8 @@
 #include "app/Application.hpp"
 
 #include "blackhole/config.hpp"
+#include "physics/Blackbody.hpp"
+#include "physics/Disk.hpp"
 #include "physics/Kerr.hpp"
 #include "physics/KerrSchild.hpp"
 #include "render/GpuPass.hpp"
@@ -15,6 +17,7 @@
 #include <filesystem>
 #include <array>
 #include <format>
+#include <vector>
 
 namespace bh {
 
@@ -31,6 +34,7 @@ constexpr double captureMargin = 1.01;
 constexpr double minEscapeRadius = 200.0;
 constexpr double escapeRadiusPerCameraDistance = 4.0;
 constexpr std::size_t shadowOutlineSamples = 512;
+constexpr std::size_t diskProfileSamples = 512;
 
 [[nodiscard]] kerr::ThreeVector toDouble(const glm::vec3& v)
 {
@@ -117,6 +121,7 @@ void Application::run()
         m_camera.setVerticalFovDegrees(m_settings.fovDegrees);
         drawOverlays();
 
+        updateDiskProfile();
         m_gpuTimer.beginFrame();
         m_renderer.draw(frameParams(framebuffer, static_cast<float>(now)), m_gpuTimer);
         m_gui.endFrame();
@@ -167,6 +172,11 @@ FrameParams Application::frameParams(const glm::ivec2 framebufferSize, const flo
         .diskEnabled = m_settings.diskEnabled,
         .diskInnerRadius = static_cast<float>(kerr::iscoRadius(a, m_settings.diskOrbit)),
         .diskOuterRadius = m_settings.diskOuterRadius,
+        .diskPeakTemperature = m_settings.diskPeakTemperature,
+        .diskBrightness = static_cast<float>(1.0 / blackbodyLuminance(static_cast<double>(m_settings.diskPeakTemperature))),
+        .diskOrbitSign = m_settings.diskOrbit == kerr::Orbit::PROGRADE ? 1.0F : -1.0F,
+        .dopplerShift = m_settings.dopplerShift,
+        .gravitationalRedshift = m_settings.gravitationalRedshift,
         .starsEnabled = m_settings.starsEnabled,
         .time = time,
         .stepScale = m_settings.stepScale,
@@ -180,6 +190,21 @@ FrameParams Application::frameParams(const glm::ivec2 framebufferSize, const flo
         .bloomEnabled = m_settings.bloomEnabled,
         .bloomStrength = m_settings.bloomStrength,
     };
+}
+
+void Application::updateDiskProfile()
+{
+    const DiskProfileKey key {.spin = m_settings.spin, .orbit = m_settings.diskOrbit,
+                              .outerRadius = m_settings.diskOuterRadius};
+    if (key == m_diskProfileKey) {
+        return;
+    }
+    const auto profile {kerr::diskTemperatureProfile(static_cast<double>(key.spin), key.orbit,
+                                                     static_cast<double>(key.outerRadius), diskProfileSamples)};
+    std::vector<float> samples(profile.size());
+    std::ranges::transform(profile, samples.begin(), [](const double value) { return static_cast<float>(value); });
+    m_renderer.setDiskProfile(samples);
+    m_diskProfileKey = key;
 }
 
 void Application::drawOverlays() const

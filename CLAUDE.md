@@ -6,9 +6,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 BlackHole is an interactive, physically based renderer of a rotating (Kerr) black hole with an optional
 accretion disk and a configurable background. The rendering runs on the GPU (OpenGL 4.3 core, GLSL);
-the C++ side owns the window, input, UI and the closed-form physics. `TODO.md` is the roadmap; Stages 0–3
-are done: rays follow Kerr null geodesics (`trace.comp` + `common/kerr.glsl`), the disk is a thin opaque
-annulus from the ISCO, but its colour is still a placeholder without Doppler or redshift (Stage 4).
+the C++ side owns the window, input, UI and the closed-form physics. `TODO.md` is the roadmap; Stages 0–4
+are done: rays follow Kerr null geodesics (`trace.comp` + `common/kerr.glsl`); the disk is a
+thin opaque Novikov–Thorne disk from the ISCO whose black-body light is shifted by `g` (Doppler,
+gravitational, frame dragging; `common/disk.glsl`). Next: image backgrounds (Stage 5).
 
 A frame is three GPU passes (`BlackHoleRenderer`): **trace** (compute, one ray per pixel at
 `renderScale` × window size → HDR radiance image) → **bloom** (compute down/up-sampling chain) →
@@ -54,7 +55,8 @@ a wrapper shell, so `kill` leaves the window open), kill it, and confirm with `p
 ```
 src/physics/   bh_physics (no OpenGL, no GLM, double precision, unit-tested):
                Kerr (closed forms, shadow outline), KerrSchild (metric, ZAMO tetrad),
-               Geodesic (Hamiltonian equations, RK4 tracer: the CPU reference for the shaders)
+               Geodesic (Hamiltonian equations, RK4 tracer: the CPU reference for the shaders),
+               Disk (Page-Thorne flux, temperature profile, redshift g), Blackbody (Planck x CIE -> sRGB)
 src/gfx/       thin OpenGL/GLFW wrappers: Window, GlObject (RAII names), ShaderProgram, GlDebug, GpuTimer;
                ShaderPreprocessor (GLSL #include; no GL, so its own bh_shadertools library, unit-tested)
 src/render/    BlackHoleRenderer (the passes), FrameParams (CPU-side frame description),
@@ -63,7 +65,8 @@ src/scene/     OrbitCamera, SceneSettings (what the UI edits)
 src/ui/        ImGuiLayer (context + backends), ControlPanel
 src/app/       Application: owns everything, runs the frame loop
 shaders/       main shaders: trace.comp, bloom_*.comp, fullscreen.vert + present.frag
-shaders/common/ shared GLSL headers: frame (UBO), kerr (geodesics), color (tone mapping, sRGB), sky, disk, random
+shaders/common/ shared GLSL headers: frame (UBO), kerr (geodesics), disk (redshift, emission),
+               color (tone mapping, sRGB), sky, random
 tests/         CTest executables (bh_physics, bh_shadertools; no GL context in tests) + GLSL validation
 external/glad/ vendored loader
 ```
@@ -85,7 +88,10 @@ is converted to GPU quantities in one place (`Application::frameParams`).
   the past horizon, where the ingoing form is singular (see `KerrSchild.hpp`).
 - Camera rays are **past-directed**: `p = −u + n` for a pixel looking along `n` in the ZAMO frame `u`.
   Never `u + n`: that is only equivalent in static spacetimes and mirrors the spin in Kerr.
-- The GLSL physics is a float copy of `src/physics/Geodesic.cpp`. Change the C++ first, prove it with a
+- Light from the disk: a black body at `T` seen with shift `g` is a black body at `gT` (`I_ν/ν³` invariant),
+  so radiance is one look-up of `gT` in the Planck table: never multiply by an extra `g⁴`. Ray momenta are
+  normalised so the camera ZAMO measures frequency 1, which is what makes `g = 1/(p·u_emitter)`.
+- The GLSL physics is a float copy of `src/physics/Geodesic.cpp` and `Disk.cpp`. Change the C++ first, prove it with a
   test in `tests/test_geodesic.cpp`, then port; keep the two algebraically identical (the GLSL may
   regroup terms for speed, e.g. reciprocals). Check the result in the app with the *Constraint* debug
   view and the *Analytic shadow edge* overlay.

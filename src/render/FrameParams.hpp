@@ -9,7 +9,7 @@ namespace bh {
 enum class ToneMapper { AGX = 0, ACES = 1, EXPONENTIAL = 2, CLAMP = 3 };
 
 // The values are the DEBUG_VIEW_* constants in shaders/common/frame.glsl.
-enum class DebugView { NONE = 0, STEPS = 1, CONSTRAINT = 2, FATE = 3 };
+enum class DebugView { NONE = 0, STEPS = 1, CONSTRAINT = 2, FATE = 3, REDSHIFT = 4 };
 
 struct FrameParams {
     // Output and resolution
@@ -27,6 +27,11 @@ struct FrameParams {
     bool diskEnabled {};
     float diskInnerRadius {};
     float diskOuterRadius {};
+    float diskPeakTemperature {};  // K
+    float diskBrightness {};       // 1 / luminance of the peak temperature
+    float diskOrbitSign {1.0F};    // +1 prograde, -1 retrograde
+    bool dopplerShift {true};
+    bool gravitationalRedshift {true};
     bool starsEnabled {};
     float time {};
 

@@ -10,7 +10,9 @@
 //   - crosses the equatorial disk between r_ISCO and r_out (disk emission), or
 //   - escapes beyond uEscapeRadius (sky, looked up in its final direction).
 // The disk is geometrically thin and opaque, so its lensed far side and the higher-order images
-// (the thin rings hugging the shadow) appear without any special treatment.
+// (the thin rings hugging the shadow) appear without any special treatment. Its light is redshifted
+// by g (Doppler, gravitational, frame dragging; see common/disk.glsl), which needs only the ray's
+// conserved p_t and L_z.
 //
 // Units G = c = M = 1. Spin axis +z, the hole rotates counterclockwise seen from +z.
 
@@ -46,6 +48,7 @@ void main()
     float pt = p4.x;
     vec3 p = p4.yzw;
     vec3 x = uCameraPosition.xyz;
+    float angularMomentum = x.x * p.y - x.y * p.x; // L_z, conserved: taken at the start, where it is exact
 
     int fate = FATE_STEP_LIMIT;
     float diskRadius = 0.0;
@@ -79,8 +82,10 @@ void main()
     }
 
     vec3 radiance = vec3(0.0);
+    float redshift = 1.0;
     if (fate == FATE_DISK) {
-        radiance = diskEmission(diskRadius);
+        redshift = diskRedshift(diskRadius, pt, angularMomentum);
+        radiance = diskRadiance(diskRadius, redshift);
     } else if (fate == FATE_ESCAPED && hasFlag(FLAG_STARS)) {
         // Far out dx/dlambda points where the light came from.
         radiance = starfield(normalize(geodesicDerivative(x, p, pt).dx));
@@ -91,6 +96,11 @@ void main()
     } else if (uDebugView == DEBUG_VIEW_CONSTRAINT) {
         // log10 |H| / |p|^2 from 1e-7 (blue) to 1e-1 (red).
         radiance = heatColor((log(max(constraintError(x, p, pt), 1.0e-12)) / log(10.0) + 7.0) / 6.0);
+    } else if (uDebugView == DEBUG_VIEW_REDSHIFT) {
+        // Disk only: white at g = 1, red down to g = 1/4, blue up to g = 4 (log scale).
+        float t = clamp(log2(redshift) / 2.0, -1.0, 1.0);
+        vec3 shifted = t < 0.0 ? mix(vec3(1.0), vec3(0.8, 0.05, 0.0), -t) : mix(vec3(1.0), vec3(0.0, 0.2, 1.0), t);
+        radiance = fate == FATE_DISK ? shifted : vec3(0.02);
     } else if (uDebugView == DEBUG_VIEW_FATE) {
         const vec3 FATE_COLORS[4] = vec3[4](vec3(0.5, 0.0, 0.0), vec3(0.1, 0.2, 0.7), vec3(1.0, 0.6, 0.1),
                                             vec3(1.0, 0.0, 1.0));

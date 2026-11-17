@@ -95,32 +95,35 @@ Follow-ups:
 - [ ] Moving cameras: boost the ZAMO tetrad (circular orbit, free fall), giving aberration.
 - [ ] Compare a CPU reference image with a GPU readback (Stage 7) to catch drift between the C++ and GLSL copies.
 
-## Stage 4 — Accretion disk (optional, toggle)
+## Stage 4 — Accretion disk (optional, toggle) ✅
 
 - [x] **Geometry**: geometrically thin, optically thick disk in the equatorial plane from `r_ISCO` to
-      `r_out`, crossing of `z = 0` located on the chord between two steps (done in Stage 3). Bisection if
-      the chord turns out too coarse once the emission is physical.
-- [ ] **Emitter motion**: circular Keplerian orbits, `u^μ = u^t (1, 0, 0, Ω)` in BL with
-      `Ω = ±1/(r^{3/2} ± a)` (`kerr::keplerianAngularVelocity`) and
-      `u^t = 1/√(−(g_tt + 2Ω g_tφ + Ω² g_φφ))`.
-- [ ] **Redshift**: `g = ν_obs/ν_em = (p_μ u^μ)_obs / (p_μ u^μ)_em`. For the static ZAMO camera this
-      reduces to a function of the photon's conserved `E`, `L_z` and the emitter's `u^t`, `Ω`. Gravitational
-      redshift and Doppler shift are both in `g`; add panel toggles that drop each one for teaching.
-- [ ] **Brightness**: `I_ν/ν³` is invariant, so bolometric intensity transforms as `I_obs = g⁴ I_em`.
-      This gives the strong Doppler beaming (one side of the disk much brighter).
-- [ ] **Emission profile**: Page–Thorne (1974) / Novikov–Thorne (1973) flux `F(r)` for a relativistic thin
-      disk (zero torque at the ISCO), local temperature `T(r) = (F/σ)^{1/4}`. Implement it in `bh_physics`
-      with tests against the Newtonian limit far out, and sample it into a 1D texture over `r/r_ISCO`.
-- [ ] **Colour**: a blackbody at temperature `T` seen with shift `g` is a blackbody at `gT`. Precompute a
-      LUT `T → linear sRGB` by integrating Planck's law against the CIE 1931 colour matching functions
-      (C++ at startup, 1D texture). Replaces the fitted `blackbodyColor` from Stage 0.
-- [ ] Disk parameters in the panel: accretion rate / peak temperature, outer radius, inclination is the
-      camera's, prograde/retrograde (already there).
-- [ ] Higher-order images come for free: let rays pass through the disk plane more than once (e.g. treat the
-      disk as partly transparent, or continue tracing after a hit for a debug view showing the n = 1, 2 photon
-      ring images).
-- [ ] Optional, clearly marked non-physical: procedural turbulence (noise advected with `Ω(r)`), thick /
-      volumetric disk, disk animation with `uTime`.
+      `r_out`, crossing of `z = 0` located on the chord between two steps (Stage 3).
+- [x] **Emission**: Page–Thorne (1974) closed-form flux `F(r)` (zero torque at the ISCO), local temperature
+      `T = T_peak (F/F_max)^{1/4}`, sampled into a 1D texture on a `u²` grid that resolves the rise at the
+      ISCO. Tested against a direct numerical Page–Thorne integral over the circular-orbit `E`, `L`, `Ω`
+      (5 spin/orbit cases, 1e-4), zero at the ISCO, Newtonian limit far out.
+- [x] **Emitter motion and redshift**: Keplerian gas, `g = 1/(u^t (p_t + Ω L_z))` from the ray's conserved
+      quantities, split through the emitter's ZAMO into gravitational (with frame dragging) × Doppler.
+      Tested against explicit contractions `p·u` in Kerr–Schild coordinates and the face-on Schwarzschild
+      `g = √(1 − 3/r)`.
+- [x] **Brightness and colour**: a black body at `T` seen with shift `g` is a black body at `gT`, so one
+      look-up of `gT` in a CIE-1931-integrated Planck table (linear sRGB, Wyman–Sloan–Shirley CMF fit)
+      gives the colour and the `g⁴` beaming at once. Tested: 6500 K near white, cool red, hot blue,
+      Rayleigh–Jeans `Y ∝ T`.
+- [x] Panel: peak temperature (`∝ (Ṁ/M²)^{1/4}`), outer radius, prograde/retrograde, Doppler and
+      gravitational shift toggles (for teaching), flux-peak radius readout, *Redshift g* debug view.
+
+No measurable cost: the shading runs once per disk pixel, after the geodesic (trace 14.1 ms as before).
+
+Follow-ups:
+- [ ] Higher-order images on demand: continue the ray through the disk plane (semi-transparent disk or a
+      debug view showing the n = 1, 2 images separately).
+- [ ] Limb darkening of the disk atmosphere (electron scattering, `I ∝ 1 + 2.06 μ`, Chandrasekhar).
+- [ ] Star field: apply the camera's own shift `g = 1/p_t` and use the Planck table instead of the fitted
+      colours (Stage 5).
+- [ ] Optional, clearly marked non-physical: procedural turbulence advected with `Ω(r)`, thick or volumetric
+      disk, animation with `uTime`.
 
 ## Stage 5 — Background (customisable)
 

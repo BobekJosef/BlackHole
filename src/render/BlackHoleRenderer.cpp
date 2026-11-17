@@ -1,15 +1,18 @@
 #include "render/BlackHoleRenderer.hpp"
 
+#include "physics/Blackbody.hpp"
 #include "render/FrameUniforms.hpp"
 #include "render/GpuPass.hpp"
 
 #include <algorithm>
+#include <cmath>
 #include <cstdint>
 #include <initializer_list>
 #include <span>
 #include <stdexcept>
 #include <system_error>
 #include <utility>
+#include <vector>
 
 namespace bh {
 
@@ -26,6 +29,38 @@ constexpr GLenum hdrFormat = GL_R11F_G11F_B10F;
 
 constexpr GLuint radianceUnit = 0;
 constexpr GLuint bloomUnit = 1;
+constexpr GLuint diskProfileUnit = 2;  // layout(binding = 2) in common/disk.glsl
+constexpr GLuint blackbodyUnit = 3;    // layout(binding = 3)
+
+// Black-body look-up: log10 T from 2.5 (316 K, invisible) to 6 (1e6 K, Rayleigh-Jeans), 1024 samples.
+constexpr float blackbodyLogTMin = 2.5F;
+constexpr float blackbodyLogTMax = 6.0F;
+constexpr int blackbodySamples = 1024;
+
+void setLinearClamp(const GLenum target)
+{
+    glTexParameteri(target, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(target, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(target, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+}
+
+[[nodiscard]] gl::Texture createBlackbodyLut()
+{
+    std::vector<float> rgb {};
+    rgb.reserve(3 * blackbodySamples);
+    for (int i {0}; i < blackbodySamples; ++i) {
+        const double logT {static_cast<double>(blackbodyLogTMin)
+                           + static_cast<double>(blackbodyLogTMax - blackbodyLogTMin) * i / (blackbodySamples - 1)};
+        const auto [r, g, b] {blackbodyRgb(std::pow(10.0, logT))};
+        rgb.insert(rgb.end(), {static_cast<float>(r), static_cast<float>(g), static_cast<float>(b)});
+    }
+    gl::Texture texture {gl::createTexture()};
+    glBindTexture(GL_TEXTURE_1D, texture.get());
+    glTexStorage1D(GL_TEXTURE_1D, 1, GL_RGB32F, blackbodySamples);
+    glTexSubImage1D(GL_TEXTURE_1D, 0, 0, blackbodySamples, GL_RGB, GL_FLOAT, rgb.data());
+    setLinearClamp(GL_TEXTURE_1D);
+    return texture;
+}
 
 // Newest modification time of any file below dir; errors count as "nothing changed".
 [[nodiscard]] std::filesystem::file_time_type newestModification(const std::filesystem::path& dir)
@@ -72,6 +107,7 @@ BlackHoleRenderer::BlackHoleRenderer(std::filesystem::path shaderDir)
         }
         return std::move(*programs);
     }()}
+    , m_blackbodyLut {createBlackbodyLut()}
 {
     glBindBuffer(GL_UNIFORM_BUFFER, m_frameUniforms.get());
     glBufferData(GL_UNIFORM_BUFFER, sizeof(FrameUniforms), nullptr, GL_DYNAMIC_DRAW);
@@ -122,6 +158,20 @@ bool BlackHoleRenderer::shaderSourcesChanged() const
     return newestModification(m_shaderDir) > m_shaderSnapshot;
 }
 
+void BlackHoleRenderer::setDiskProfile(const std::span<const float> profile)
+{
+    const int size {static_cast<int>(profile.size())};
+    if (size != m_diskProfileSize) {
+        m_diskProfile = gl::createTexture();
+        glBindTexture(GL_TEXTURE_1D, m_diskProfile.get());
+        glTexStorage1D(GL_TEXTURE_1D, 1, GL_R32F, size);
+        setLinearClamp(GL_TEXTURE_1D);
+        m_diskProfileSize = size;
+    }
+    glBindTexture(GL_TEXTURE_1D, m_diskProfile.get());
+    glTexSubImage1D(GL_TEXTURE_1D, 0, 0, size, GL_RED, GL_FLOAT, profile.data());
+}
+
 void BlackHoleRenderer::resizeTargets(const glm::ivec2 traceSize)
 {
     const auto createTarget = [](const glm::ivec2 size) {
@@ -159,8 +209,15 @@ void BlackHoleRenderer::uploadFrameUniforms(const FrameParams& frame)
         .maxStepFraction = frame.maxStepFraction,
         .escapeRadius = frame.escapeRadius,
         .maxSteps = static_cast<std::uint32_t>(std::max(frame.maxSteps, 1)),
-        .flags = (frame.diskEnabled ? frameFlagDisk : 0U) | (frame.starsEnabled ? frameFlagStars : 0U),
+        .flags = (frame.diskEnabled ? frameFlagDisk : 0U) | (frame.starsEnabled ? frameFlagStars : 0U)
+               | (frame.dopplerShift ? frameFlagDoppler : 0U)
+               | (frame.gravitationalRedshift ? frameFlagGravitationalRedshift : 0U),
         .debugView = static_cast<std::uint32_t>(std::to_underlying(frame.debugView)),
+        .diskPeakTemperature = frame.diskPeakTemperature,
+        .diskBrightness = frame.diskBrightness,
+        .diskOrbitSign = frame.diskOrbitSign,
+        .blackbodyLogTMin = blackbodyLogTMin,
+        .blackbodyLogTMax = blackbodyLogTMax,
     };
     glBindBuffer(GL_UNIFORM_BUFFER, m_frameUniforms.get());
     glBufferSubData(GL_UNIFORM_BUFFER, 0, sizeof(uniforms), &uniforms);
@@ -169,6 +226,10 @@ void BlackHoleRenderer::uploadFrameUniforms(const FrameParams& frame)
 void BlackHoleRenderer::trace()
 {
     m_programs.trace.use();
+    glActiveTexture(GL_TEXTURE0 + diskProfileUnit);
+    glBindTexture(GL_TEXTURE_1D, m_diskProfile.get());
+    glActiveTexture(GL_TEXTURE0 + blackbodyUnit);
+    glBindTexture(GL_TEXTURE_1D, m_blackbodyLut.get());
     glBindImageTexture(0, m_radiance.texture.get(), 0, GL_FALSE, 0, GL_WRITE_ONLY, hdrFormat);
     dispatchOver(m_radiance.size);
     imageWriteBarrier();
