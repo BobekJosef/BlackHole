@@ -1,27 +1,17 @@
 // Checks the GLSL #include preprocessor: inlining, #line bookkeeping, error paths and the
 // mapping of driver log locations back to file names.
 
+#include "Check.hpp"
 #include "gfx/ShaderPreprocessor.hpp"
 
 #include <filesystem>
 #include <fstream>
-#include <iostream>
-#include <source_location>
 #include <string>
 #include <string_view>
 
 namespace {
 
-int g_failures {0};
-
-void expect(const bool condition, const std::string_view what,
-            const std::source_location where = std::source_location::current())
-{
-    if (!condition) {
-        ++g_failures;
-        std::cerr << where.file_name() << ':' << where.line() << ": " << what << '\n';
-    }
-}
+using bh::test::expect;
 
 void writeFile(const std::filesystem::path& path, const std::string_view contents)
 {
@@ -36,17 +26,19 @@ void writeFile(const std::filesystem::path& path, const std::string_view content
 
 } // namespace
 
-int main()
+TEST_CASE("includes, #line bookkeeping, errors and log mapping")
 {
     const std::filesystem::path root {std::filesystem::temp_directory_path() / "blackhole_test_shader_preprocessor"};
     std::filesystem::remove_all(root);
 
-    writeFile(root / "main.comp", "#version 430 core\n"
-                                  "#extension GL_GOOGLE_include_directive : enable\n"
-                                  "#include \"common/a.glsl\"\n"
-                                  "void main() {}\n");
-    writeFile(root / "common/a.glsl", "#include \"b.glsl\"\n"
-                                      "float a() { return b(); }\n");
+    writeFile(root / "main.comp",
+              "#version 430 core\n"
+              "#extension GL_GOOGLE_include_directive : enable\n"
+              "#include \"common/a.glsl\"\n"
+              "void main() {}\n");
+    writeFile(root / "common/a.glsl",
+              "#include \"b.glsl\"\n"
+              "float a() { return b(); }\n");
     writeFile(root / "common/b.glsl", "float b() { return 1.0; }\n");
 
     const auto result {bh::gl::preprocessShader(root / "main.comp")};
@@ -89,10 +81,4 @@ int main()
     expect(!malformed && contains(malformed.error(), "malformed.comp:1"), "malformed #include is reported");
 
     std::filesystem::remove_all(root);
-    if (g_failures != 0) {
-        std::cerr << g_failures << " check(s) failed\n";
-        return 1;
-    }
-    std::cout << "all shader preprocessor checks passed\n";
-    return 0;
 }

@@ -7,6 +7,7 @@
 //  - Kerr: capture thresholds of equatorial rays at the prograde/retrograde critical xi (Bardeen 1973),
 //    both for rays from infinity and through a camera pixel, which also fixes the sense of rotation.
 
+#include "Check.hpp"
 #include "physics/Geodesic.hpp"
 #include "physics/Kerr.hpp"
 #include "physics/KerrSchild.hpp"
@@ -14,35 +15,16 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
-#include <iostream>
 #include <numbers>
 #include <source_location>
 #include <string_view>
 
 namespace {
 
+using bh::test::expect;
+using bh::test::expectNear;
+
 namespace kerr = bh::kerr;
-
-int g_failures {0};
-
-void expect(const bool condition, const std::string_view what,
-            const std::source_location where = std::source_location::current())
-{
-    if (!condition) {
-        ++g_failures;
-        std::cerr << where.file_name() << ':' << where.line() << ": " << what << '\n';
-    }
-}
-
-void expectNear(const double actual, const double expected, const double tolerance, const std::string_view what,
-                const std::source_location where = std::source_location::current())
-{
-    if (!(std::abs(actual - expected) <= tolerance)) { // written so that NaN fails
-        ++g_failures;
-        std::cerr << where.file_name() << ':' << where.line() << ": " << what << ": got " << actual << ", expected "
-                  << expected << " +- " << tolerance << '\n';
-    }
-}
 
 void testMetric()
 {
@@ -89,8 +71,8 @@ void testZamo()
         kerr::ThreeVector minus {position};
         plus[i] += eps;
         minus[i] -= eps;
-        drdTau += tetrad.time[i + 1]
-                * (kerr::boyerLindquistRadius(plus, a) - kerr::boyerLindquistRadius(minus, a)) / (2.0 * eps);
+        drdTau += tetrad.time[i + 1] * (kerr::boyerLindquistRadius(plus, a) - kerr::boyerLindquistRadius(minus, a))
+            / (2.0 * eps);
     }
     expectNear(drdTau, 0.0, 1e-8, "ZAMO stays at constant r");
 
@@ -172,8 +154,7 @@ void testKerrCapture()
     expect(incomingRay(xiPro * (1.0 + margin), a).fate == kerr::RayFate::ESCAPED, "prograde ray outside escapes");
     expect(incomingRay(xiPro * (1.0 - margin), a).fate == kerr::RayFate::CAPTURED, "prograde ray inside captured");
     expect(incomingRay(xiRetro * (1.0 + margin), a).fate == kerr::RayFate::ESCAPED, "retrograde ray outside escapes");
-    expect(incomingRay(xiRetro * (1.0 - margin), a).fate == kerr::RayFate::CAPTURED,
-           "retrograde ray inside captured");
+    expect(incomingRay(xiRetro * (1.0 - margin), a).fate == kerr::RayFate::CAPTURED, "retrograde ray inside captured");
 }
 
 // Fate of the camera ray at angle psi to the right of forward, for a ZAMO camera on the +x axis
@@ -190,8 +171,8 @@ void testCamera()
 {
     // Schwarzschild, static observer at r = 20: the exact shadow radius.
     constexpr double distance = 20.0;
-    const double psi {std::asin(kerr::schwarzschildCriticalImpactParameter * std::sqrt(1.0 - 2.0 / distance)
-                                / distance)};
+    const double psi {
+        std::asin(kerr::schwarzschildCriticalImpactParameter * std::sqrt(1.0 - 2.0 / distance) / distance)};
     expect(cameraRayFate(distance, psi * 1.003, 0.0) == kerr::RayFate::ESCAPED, "a = 0: outside the shadow edge");
     expect(cameraRayFate(distance, psi * 0.997, 0.0) == kerr::RayFate::CAPTURED, "a = 0: inside the shadow edge");
 
@@ -214,8 +195,8 @@ void testCamera()
 //    with E = p_t and L = -p_phi = -(x p_y - y p_x) for the past-directed ray, alpha^2 = Sigma Delta / A.
 void testSkyRedshift()
 {
-    const std::array<kerr::ThreeVector, 4> directions {{{0.0, 0.0, 1.0}, {0.6, 0.0, 0.8}, {-0.6, 0.0, 0.8},
-                                                       {0.3, -0.5, std::sqrt(0.66)}}};
+    const std::array<kerr::ThreeVector, 4> directions {
+        {{0.0, 0.0, 1.0}, {0.6, 0.0, 0.8}, {-0.6, 0.0, 0.8}, {0.3, -0.5, std::sqrt(0.66)}}};
     constexpr double r = 6.0;
     for (const kerr::ThreeVector& n : directions) {
         const kerr::ThreeVector position {r, 0.0, 0.0};
@@ -243,6 +224,44 @@ void testSkyRedshift()
         expectNear((energy - omega * angularMomentum) / alpha, 1.0, 1e-12, "ZAMO measures frequency 1");
         expect(kerr::skyRedshift(ray) != previous, "Kerr: g depends on the direction");
         previous = kerr::skyRedshift(ray);
+    }
+}
+
+// The thin-disk crossing and the camera's pixel mapping of the CPU reference tracer.
+void testDiskCrossing()
+{
+    // Pixel mapping: the centre looks forward, the top edge at the vertical half-angle, x scaled by aspect.
+    constexpr double tanHalfFov = 0.5;
+    const kerr::ThreeVector centre {kerr::cameraPixelDirection(80.0, 45.0, 160, 90, tanHalfFov)};
+    expectNear(centre[2], 1.0, 1e-15, "centre pixel looks forward");
+    const kerr::ThreeVector top {kerr::cameraPixelDirection(80.0, 90.0, 160, 90, tanHalfFov)};
+    expectNear(top[1] / top[2], tanHalfFov, 1e-15, "top edge at the half field of view");
+    const kerr::ThreeVector right {kerr::cameraPixelDirection(160.0, 45.0, 160, 90, tanHalfFov)};
+    expectNear(right[0] / right[2], tanHalfFov * 160.0 / 90.0, 1e-15, "right edge: aspect ratio");
+
+    // A ray from above aimed at the equatorial plane hits a disk spanning that region, on z = 0, at the
+    // Boyer-Lindquist radius of the hit point; without the disk (or with one that ends short of it) the
+    // same ray goes on and escapes.
+    for (const double a : {0.0, 0.9}) {
+        const kerr::Photon ray {kerr::photonAlong({20.0, 0.0, 20.0}, {0.1, 0.0, -1.0}, 1.0, a)};
+        const kerr::TraceSettings settings {.stepScale = 0.02,
+                                            .maxStepFraction = 0.25,
+                                            .escapeRadius = 200.0,
+                                            .disk = kerr::DiskExtent {.innerRadius = 3.0, .outerRadius = 60.0}};
+        const kerr::TraceResult hit {kerr::traceRay(ray, a, settings)};
+        expect(hit.fate == kerr::RayFate::DISK && hit.diskHit.has_value(), "ray towards the plane hits the disk");
+        if (hit.diskHit) {
+            const auto& [position, radius] {*hit.diskHit};
+            expect(position[2] == 0.0, "hit on z = 0");
+            expectNear(radius, kerr::boyerLindquistRadius(position, a), 1e-12, "hit radius is r there");
+            expect(radius > 18.0 && radius < 24.0, "near where it was aimed (weakly bent)");
+        }
+        kerr::TraceSettings shortDisk {settings};
+        shortDisk.disk = kerr::DiskExtent {.innerRadius = 3.0, .outerRadius = 10.0};
+        kerr::TraceSettings noDisk {settings};
+        noDisk.disk.reset();
+        expect(kerr::traceRay(ray, a, shortDisk).fate == kerr::RayFate::ESCAPED, "passes outside a smaller disk");
+        expect(kerr::traceRay(ray, a, noDisk).fate == kerr::RayFate::ESCAPED, "escapes without a disk");
     }
 }
 
@@ -293,22 +312,52 @@ void testShadowOutline()
 
 } // namespace
 
-int main()
+TEST_CASE("Kerr-Schild metric")
 {
     testMetric();
-    testZamo();
-    testHamiltonEquations();
-    testSchwarzschild();
-    testKerrCapture();
-    testCamera();
-    testSkyRedshift();
-    testEscapeDirection();
-    testShadowOutline();
+}
 
-    if (g_failures != 0) {
-        std::cerr << g_failures << " check(s) failed\n";
-        return 1;
-    }
-    std::cout << "all geodesic checks passed\n";
-    return 0;
+TEST_CASE("ZAMO tetrad")
+{
+    testZamo();
+}
+
+TEST_CASE("Hamilton equations against finite differences")
+{
+    testHamiltonEquations();
+}
+
+TEST_CASE("Schwarzschild deflection and capture")
+{
+    testSchwarzschild();
+}
+
+TEST_CASE("Kerr capture thresholds")
+{
+    testKerrCapture();
+}
+
+TEST_CASE("camera rays and the shadow edge")
+{
+    testCamera();
+}
+
+TEST_CASE("the camera's shift of the sky")
+{
+    testSkyRedshift();
+}
+
+TEST_CASE("disk crossing and pixel mapping (CPU reference)")
+{
+    testDiskCrossing();
+}
+
+TEST_CASE("escape direction converges by r = 200")
+{
+    testEscapeDirection();
+}
+
+TEST_CASE("analytic shadow outline")
+{
+    testShadowOutline();
 }

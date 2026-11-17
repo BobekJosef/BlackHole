@@ -1,0 +1,11 @@
+# LeakSanitizer suppressions for the asan preset: leaks inside the GPU driver only (CLAUDE.md, "Warnings").
+# A frame of ours in the stack is never a reason to add a line here. Driver libraries are often unloaded
+# by exit time (their frames print as <unknown module>), so lines name the GLFW function that called in.
+#
+# Mesa: glXQueryExtensionsString during GLFW's GLX initialisation keeps 128 bytes for the process lifetime.
+leak:_glfwInitGLX
+# Named drivers, for when their frames do resolve.
+leak:radeonsi_dri.so
+leak:libgallium
+leak:libnvidia-
+leak:libGLX_mesa.so

@@ -1,0 +1,87 @@
+# Builds and tests without a GPU: compiler warnings as errors, unit tests, offline GLSL validation,
+# sanitizers, formatting and static analysis. The GPU-vs-CPU reference test (blackhole --validate) needs a
+# GPU and runs locally only (-DBLACKHOLE_GPU_TESTS=ON).
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CMAKE_GENERATOR: Ninja
+  LINUX_PACKAGES: >-
+    ninja-build glslang-tools libgl-dev
+    libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev
+  LLVM_VERSION: "21" # clang 18 (Ubuntu 24.04's) cannot use std::expected from libstdc++ 13
+
+jobs:
+  linux-gcc:
+    name: Linux GCC (debug, -Werror)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install dependencies
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends $LINUX_PACKAGES
+      - name: Configure
+        run: cmake --preset debug
+      - name: Build
+        run: cmake --build --preset debug
+      - name: Test
+        run: ctest --preset debug
+
+  linux-clang-sanitizers:
+    name: Linux Clang (ASan + UBSan, -Werror)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install dependencies
+        run: |
+          sudo apt-get update && sudo apt-get install -y --no-install-recommends $LINUX_PACKAGES
+          wget -qO llvm.sh https://apt.llvm.org/llvm.sh && sudo bash llvm.sh "$LLVM_VERSION"
+      - name: Configure
+        run: >-
+          cmake --preset asan
+          -DCMAKE_C_COMPILER=clang-$LLVM_VERSION -DCMAKE_CXX_COMPILER=clang++-$LLVM_VERSION
+      - name: Build
+        run: cmake --build --preset asan
+      - name: Test
+        run: ctest --preset asan
+
+  lint:
+    name: clang-format + clang-tidy
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install dependencies
+        run: |
+          sudo apt-get update && sudo apt-get install -y --no-install-recommends $LINUX_PACKAGES
+          wget -qO llvm.sh https://apt.llvm.org/llvm.sh && sudo bash llvm.sh "$LLVM_VERSION" all
+          sudo ln -sf "$(command -v clang-format-$LLVM_VERSION)" /usr/local/bin/clang-format
+          sudo ln -sf "$(command -v clang-tidy-$LLVM_VERSION)" /usr/local/bin/clang-tidy
+      - name: Configure (compile database)
+        run: >-
+          cmake --preset debug
+          -DCMAKE_C_COMPILER=clang-$LLVM_VERSION -DCMAKE_CXX_COMPILER=clang++-$LLVM_VERSION
+      - name: Lint
+        run: scripts/lint.sh
+
+  windows-msvc:
+    name: Windows MSVC (/W4 /WX)
+    runs-on: windows-latest
+    env:
+      CMAKE_GENERATOR: Visual Studio 17 2022
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure
+        run: cmake -S . -B build -DBLACKHOLE_WERROR=ON
+      - name: Build
+        run: cmake --build build --config Debug --parallel
+      - name: Test
+        run: ctest --test-dir build -C Debug --output-on-failure

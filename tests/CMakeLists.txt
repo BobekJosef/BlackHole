@@ -1,37 +1,46 @@
-add_executable(test_kerr test_kerr.cpp)
-target_link_libraries(test_kerr PRIVATE bh_physics)
-blackhole_configure_target(test_kerr)
-add_test(NAME kerr COMMAND test_kerr)
+# doctest: each TEST_CASE becomes its own CTest test ("<suite>/<case>"). Its main() is compiled once,
+# from a generated translation unit, so DOCTEST_CONFIG_IMPLEMENT_WITH_MAIN stays a compile definition.
+include(FetchContent)
+set(DOCTEST_NO_INSTALL ON CACHE BOOL "" FORCE)
+set(DOCTEST_WITH_TESTS OFF CACHE BOOL "" FORCE)
+set(DOCTEST_WITH_MAIN_IN_STATIC_LIB OFF CACHE BOOL "" FORCE)
+FetchContent_Declare(doctest
+    GIT_REPOSITORY https://github.com/doctest/doctest.git
+    GIT_TAG v2.5.3
+    GIT_SHALLOW TRUE
+    SYSTEM)
+FetchContent_MakeAvailable(doctest)
+include("${doctest_SOURCE_DIR}/scripts/cmake/doctest.cmake")
 
-add_executable(test_geodesic test_geodesic.cpp)
-target_link_libraries(test_geodesic PRIVATE bh_physics)
-blackhole_configure_target(test_geodesic)
-add_test(NAME geodesic COMMAND test_geodesic)
+file(CONFIGURE OUTPUT "${PROJECT_BINARY_DIR}/generated/doctest_main.cpp" CONTENT "#include <doctest/doctest.h>\n")
+add_library(bh_test_main OBJECT "${PROJECT_BINARY_DIR}/generated/doctest_main.cpp")
+target_link_libraries(bh_test_main PUBLIC doctest::doctest)
+target_compile_definitions(bh_test_main PRIVATE DOCTEST_CONFIG_IMPLEMENT_WITH_MAIN)
 
-add_executable(test_observer test_observer.cpp)
-target_link_libraries(test_observer PRIVATE bh_physics)
-blackhole_configure_target(test_observer)
-add_test(NAME observer COMMAND test_observer)
+# blackhole_add_test(<suite> <libraries...>): test_<suite>.cpp, linked with the libraries under test.
+function(blackhole_add_test suite)
+    add_executable(test_${suite} test_${suite}.cpp)
+    target_link_libraries(test_${suite} PRIVATE bh_test_main doctest::doctest ${ARGN})
+    target_include_directories(test_${suite} PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
+    blackhole_configure_target(test_${suite})
+    doctest_discover_tests(test_${suite} TEST_PREFIX "${suite}/")
+endfunction()
 
-add_executable(test_disk test_disk.cpp)
-target_link_libraries(test_disk PRIVATE bh_physics)
-blackhole_configure_target(test_disk)
-add_test(NAME disk COMMAND test_disk)
+blackhole_add_test(kerr bh_physics)
+blackhole_add_test(geodesic bh_physics)
+blackhole_add_test(observer bh_physics)
+blackhole_add_test(disk bh_physics)
+blackhole_add_test(sky_image bh_assets)
+blackhole_add_test(preset bh_presets)
+target_compile_definitions(test_preset PRIVATE BLACKHOLE_PRESET_DIR="${PROJECT_SOURCE_DIR}/presets")
+blackhole_add_test(shader_preprocessor bh_shadertools)
 
-add_executable(test_sky_image test_sky_image.cpp)
-target_link_libraries(test_sky_image PRIVATE bh_assets)
-blackhole_configure_target(test_sky_image)
-add_test(NAME sky_image COMMAND test_sky_image)
-
-add_executable(test_preset test_preset.cpp)
-target_link_libraries(test_preset PRIVATE bh_presets)
-blackhole_configure_target(test_preset)
-add_test(NAME preset COMMAND test_preset "${PROJECT_SOURCE_DIR}/presets")
-
-add_executable(test_shader_preprocessor test_shader_preprocessor.cpp)
-target_link_libraries(test_shader_preprocessor PRIVATE bh_shadertools)
-blackhole_configure_target(test_shader_preprocessor)
-add_test(NAME shader_preprocessor COMMAND test_shader_preprocessor)
+# The GPU tracer against the CPU reference (needs an OpenGL 4.3 GPU and a display, so off by default and in
+# CI): cmake --preset debug -DBLACKHOLE_GPU_TESTS=ON.
+if(BLACKHOLE_GPU_TESTS)
+    add_test(NAME gpu_reference COMMAND blackhole --validate)
+    set_tests_properties(gpu_reference PROPERTIES LABELS gpu)
+endif()
 
 # Offline GLSL validation, when glslangValidator is installed (Debian/Ubuntu: glslang-tools).
 # -G (OpenGL SPIR-V target) is the mode in which glslang resolves #include; --aml assigns the

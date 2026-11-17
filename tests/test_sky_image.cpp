@@ -4,30 +4,20 @@
 
 #include "assets/PngFile.hpp"
 #include "assets/SkyImage.hpp"
+#include "Check.hpp"
 
 #include <algorithm>
 #include <array>
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
-#include <iostream>
-#include <source_location>
 #include <string>
 #include <string_view>
 #include <vector>
 
 namespace {
 
-int g_failures {0};
-
-void expect(const bool condition, const std::string_view what,
-            const std::source_location where = std::source_location::current())
-{
-    if (!condition) {
-        ++g_failures;
-        std::cerr << where.file_name() << ':' << where.line() << ": " << what << '\n';
-    }
-}
+using bh::test::expect;
 
 void writeFile(const std::filesystem::path& path, const std::string_view contents)
 {
@@ -142,9 +132,7 @@ void testCubeMap(const std::filesystem::path& dir)
 void testFind(const std::filesystem::path& dir)
 {
     const std::vector<std::filesystem::path> found {bh::findSkyImages(dir)};
-    const auto has = [&](const std::string_view name) {
-        return std::ranges::find(found, dir / name) != found.end();
-    };
+    const auto has = [&](const std::string_view name) { return std::ranges::find(found, dir / name) != found.end(); };
     expect(has("sky.ppm") && has("sky.hdr") && has("cube_px") && has("cube_right"), "maps and cube maps listed");
     expect(!has("not_a_cube"), "other directories are not");
     expect(std::ranges::is_sorted(found), "sorted");
@@ -155,8 +143,9 @@ void testPngWriter(const std::filesystem::path& dir)
     // 4x2 so the reader takes it as an equirectangular map; every pixel distinct, rows top first.
     bh::RgbaImage image {.width = 4, .height = 2, .pixels = {}};
     for (int i {0}; i < 8; ++i) {
-        image.pixels.insert(image.pixels.end(), {static_cast<std::uint8_t>(30 * i), static_cast<std::uint8_t>(7 * i),
-                                                 static_cast<std::uint8_t>(255 - 30 * i), 255});
+        image.pixels.insert(image.pixels.end(),
+                            {static_cast<std::uint8_t>(30 * i), static_cast<std::uint8_t>(7 * i),
+                             static_cast<std::uint8_t>(255 - 30 * i), 255});
     }
     const std::filesystem::path path {dir / "shots" / "round_trip.png"};
     expect(bh::writePng(path, image).has_value(), "PNG written (missing directory created)");
@@ -178,19 +167,13 @@ void testPngWriter(const std::filesystem::path& dir)
 
 } // namespace
 
-int main()
+TEST_CASE("sky maps and PNG files")
 {
+    // One directory for all: the listing checks see the files the others wrote.
     const TemporaryDirectory dir {};
     testEquirectangular(dir.path());
     testHdr(dir.path());
     testCubeMap(dir.path());
     testFind(dir.path());
     testPngWriter(dir.path());
-
-    if (g_failures != 0) {
-        std::cerr << g_failures << " check(s) failed\n";
-        return 1;
-    }
-    std::cout << "all sky image checks passed\n";
-    return 0;
 }

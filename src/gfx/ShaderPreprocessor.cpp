@@ -18,7 +18,7 @@ constexpr std::string_view includeExtension = "#extension GL_GOOGLE_include_dire
 
 [[nodiscard]] std::expected<std::string, std::string> readFile(const std::filesystem::path& path)
 {
-    std::ifstream file {path, std::ios::binary};
+    const std::ifstream file {path, std::ios::binary};
     if (!file) {
         return std::unexpected {"cannot open " + path.string()};
     }
@@ -49,8 +49,8 @@ public:
     [[nodiscard]] std::expected<void, std::string> process(const std::filesystem::path& file, const int depth)
     {
         if (depth > maxIncludeDepth) {
-            return std::unexpected {std::format("{}: includes nested deeper than {} (a cycle?)", file.string(),
-                                                maxIncludeDepth)};
+            return std::unexpected {
+                std::format("{}: includes nested deeper than {} (a cycle?)", file.string(), maxIncludeDepth)};
         }
         const auto text {readFile(file)};
         if (!text) {
@@ -80,8 +80,8 @@ public:
             }
             m_result.source += std::format("#line 1 {}\n", m_result.files.size());
             if (auto included {process(file.parent_path() / *name, depth + 1)}; !included) {
-                return std::unexpected {std::format("{}\n  included from {}:{}", included.error(), file.string(),
-                                                    lineNumber)};
+                return std::unexpected {
+                    std::format("{}\n  included from {}:{}", included.error(), file.string(), lineNumber)};
             }
             m_result.source += std::format("#line {} {}\n", lineNumber + 1, index);
         }
@@ -121,13 +121,13 @@ std::string annotateShaderLog(const std::string_view log, const std::span<const 
         const auto isKnownFile = [&] {
             const std::string digits {match[2].str()};
             return std::from_chars(digits.data(), digits.data() + digits.size(), fileIndex).ec == std::errc {}
-                && fileIndex < files.size();
+            && fileIndex < files.size();
         };
         if (std::regex_search(line, match, location) && isKnownFile()) {
             const std::string lineNumber {match[3].matched ? match[3].str() : match[4].str()};
             const std::filesystem::path name {files[fileIndex].lexically_relative(shaderRoot)};
-            annotated += std::format("{}{}:{}{}\n", match[1].str(), name.generic_string(), lineNumber,
-                                     match.suffix().str());
+            annotated +=
+                std::format("{}{}:{}{}\n", match[1].str(), name.generic_string(), lineNumber, match.suffix().str());
         } else {
             annotated += line;
             annotated += '\n';

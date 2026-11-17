@@ -27,7 +27,7 @@ struct Xyz {
 {
     return Xyz {
         .x = 1.056 * lobe(lambda, 599.8, 37.9, 31.0) + 0.362 * lobe(lambda, 442.0, 16.0, 26.7)
-           - 0.065 * lobe(lambda, 501.1, 20.4, 26.2),
+            - 0.065 * lobe(lambda, 501.1, 20.4, 26.2),
         .y = 0.821 * lobe(lambda, 568.8, 46.9, 40.5) + 0.286 * lobe(lambda, 530.9, 16.3, 31.1),
         .z = 1.217 * lobe(lambda, 437.0, 11.8, 36.0) + 0.681 * lobe(lambda, 459.0, 26.0, 13.8),
     };

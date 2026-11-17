@@ -38,6 +38,11 @@ uniform vec2 uJitter;       // sub-pixel offset of this frame's rays, in pixels
 uniform uint uSampleIndex;  // n: frames already in uAverage (0 starts over)
 uniform bool uAccumulate;   // keep uAverage up to date
 
+// Validation against the CPU reference tracer (blackhole --validate, kerr::traceRay): per pixel
+// (fate, a, b, c): escaped -> final direction; disk -> hit x, y and Boyer-Lindquist r; otherwise steps.
+layout(rgba32f, binding = 2) uniform writeonly image2D uValidation;
+uniform bool uValidate;
+
 const int FATE_CAPTURED = 0;
 const int FATE_ESCAPED = 1;
 const int FATE_DISK = 2;
@@ -277,6 +282,13 @@ void main()
                                             vec3(1.0, 0.0, 1.0));
         radiance = FATE_COLORS[ray.fate];
     }
+    if (uValidate) {
+        vec3 data = escaped ? direction
+                  : ray.diskLayers > 0 ? vec3(ray.diskHit.xy, ray.diskRadius)
+                                       : vec3(float(ray.steps), 0.0, 0.0);
+        imageStore(uValidation, pixel, vec4(float(ray.fate), data));
+    }
+
     // r11f_g11f_b10f has no value above 64512 (the 10-bit blue channel's largest): anything larger is
     // stored as Inf, which the bloom's Karis average turns into NaN squares. Physically such a pixel is
     // simply saturated.

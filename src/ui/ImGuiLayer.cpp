@@ -4,16 +4,9 @@
 #include <imgui_impl_glfw.h>
 #include <imgui_impl_opengl3.h>
 
-#include <cmath>
 #include <stdexcept>
 
 namespace bh {
-
-namespace {
-
-constexpr float baseFontPixels = 13.0F; // Dear ImGui's default font size
-
-} // namespace
 
 ImGuiLayer::ImGuiLayer(GLFWwindow* const window)
 {
@@ -41,16 +34,12 @@ void ImGuiLayer::setScale(const float scale)
 
 void ImGuiLayer::applyScale()
 {
-    ImGui::GetStyle() = m_baseStyle;
-    ImGui::GetStyle().ScaleAllSizes(m_scale);
-    ImGuiIO& io {ImGui::GetIO()};
-    io.Fonts->Clear();
-    ImFontConfig font {};
-    font.SizePixels = std::round(baseFontPixels * m_scale);
-    io.Fonts->AddFontDefault(&font);
-    // Between frames: the backend uploads the new atlas.
-    ImGui_ImplOpenGL3_DestroyFontsTexture();
-    ImGui_ImplOpenGL3_CreateFontsTexture();
+    // Sizes from the unscaled style, so rescaling never compounds. Fonts are rasterised at whatever size
+    // is drawn (Dear ImGui 1.92+), so the font scale alone keeps text sharp.
+    ImGuiStyle& style {ImGui::GetStyle()};
+    style = m_baseStyle;
+    style.ScaleAllSizes(m_scale);
+    style.FontScaleDpi = m_scale;
     m_appliedScale = m_scale;
 }
 
@@ -68,6 +57,16 @@ void ImGuiLayer::endFrame()
 {
     ImGui::Render();
     ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
+}
+
+void ImGuiLayer::setMouseEnabled(const bool enabled)
+{
+    ImGuiIO& io {ImGui::GetIO()};
+    if (enabled) {
+        io.ConfigFlags &= ~ImGuiConfigFlags_NoMouse;
+    } else {
+        io.ConfigFlags |= ImGuiConfigFlags_NoMouse;
+    }
 }
 
 bool ImGuiLayer::wantsMouse() const

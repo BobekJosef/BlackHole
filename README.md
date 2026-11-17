@@ -58,7 +58,7 @@ Planned: adaptive resolution, temporal anti-aliasing, moving cameras, a real sta
 
 Optional: `glslang-tools` (Debian/Ubuntu) adds offline validation of every shader to `ctest`.
 
-GLFW 3.4, GLM 1.0.1, Dear ImGui 1.91.9b and stb_image are fetched automatically (an installed GLFW or GLM, e.g. from
+GLFW 3.5.1, GLM 1.0.3, Dear ImGui 1.93.0, stb_image and (for the tests) doctest 2.5.3 are fetched automatically (an installed GLFW or GLM, e.g. from
 vcpkg, is used instead when CMake finds one). The GLAD loader is vendored in `external/glad`.
 
 ## Build and run
@@ -78,7 +78,7 @@ terminal.
 ```sh
 cmake --preset debug
 cmake --build --preset debug -j
-ctest --preset debug              # unit tests
+ctest --preset debug              # unit tests (doctest; one CTest entry per test case)
 ./build/debug/src/blackhole
 ```
 
@@ -88,6 +88,18 @@ ctest --preset debug              # unit tests
 | `debug`          | Debug          | development (warnings as errors, GL debug output)   |
 | `asan`           | Debug          | hunting memory bugs (AddressSanitizer + UBSan)      |
 | `relwithdebinfo` | RelWithDebInfo | profiling with symbols                              |
+
+Quality checks:
+
+```sh
+./build/release/src/blackhole --validate   # GPU tracer vs the double-precision CPU reference (needs a GPU)
+scripts/lint.sh                            # clang-format + clang-tidy (--fix reformats first)
+LSAN_OPTIONS=suppressions=$PWD/scripts/lsan.supp ./build/asan/src/blackhole   # sanitizers, GPU-driver leaks muted
+```
+
+`cmake --preset debug -DBLACKHOLE_GPU_TESTS=ON` adds the GPU validation to `ctest`. CI
+(`.github/workflows/ci.yml`) builds with GCC, Clang (with sanitizers) and MSVC, and runs the unit tests and
+the linters; it has no GPU.
 
 Each preset has its own directory under `build/`, so they can coexist. After editing a `CMakeLists.txt`,
 just build again; CMake re-configures itself. Shaders are read from `shaders/` in the source tree at run
@@ -146,12 +158,13 @@ again at full quality: at the window's size, or at a fixed size up to 7680 × 43
 | Left drag          | Orbit around the black hole  |
 | Right drag         | Look around (every camera mode) |
 | Right double click, C | Look back at the hole      |
-| Wheel click        | Orbit on/off without holding a button (a left click also ends it) |
+| Wheel click        | Orbit on/off without holding a button: slower, cursor hidden and not stopped by the screen edges (a left click or Esc also ends it) |
 | Scroll             | Zoom in / out                |
 | F11                | Fullscreen on/off            |
 | F12                | Screenshot (PNG)             |
 | R                  | Recompile shaders now        |
-| Esc                | Leave fullscreen, else quit  |
+| Ctrl+C (terminal)  | Close cleanly                |
+| Esc                | End wheel-click orbiting, else leave fullscreen, else quit |
 
 ## Project layout
 

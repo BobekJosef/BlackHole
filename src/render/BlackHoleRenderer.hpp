@@ -45,6 +45,11 @@ public:
     // `samples` jittered frames are averaged first (anti-aliasing).
     [[nodiscard]] std::expected<RgbaImage, std::string> renderImage(const FrameParams& frame, std::uint32_t samples);
 
+    // Validation against the CPU reference (blackhole --validate): traces `frame` once at frame.outputSize
+    // (render scale 1, no jitter) and returns per pixel, rows from the bottom, (fate, a, b, c) with the
+    // fate as trace.comp's FATE_* value: escaped -> final direction; disk -> hit x, y, r; else steps.
+    [[nodiscard]] std::vector<glm::vec4> traceForValidation(const FrameParams& frame);
+
     static constexpr std::uint32_t maxAccumulatedSamples {256};
     // Frames averaged into the image shown (1 while anything changes).
     [[nodiscard]] std::uint32_t accumulatedSamples() const { return m_samples; }

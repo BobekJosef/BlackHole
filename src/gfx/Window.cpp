@@ -78,6 +78,7 @@ Window::Window(const WindowDesc& desc)
     glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
     glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GLFW_TRUE);
     glfwWindowHint(GLFW_OPENGL_DEBUG_CONTEXT, desc.debugContext ? GLFW_TRUE : GLFW_FALSE);
+    glfwWindowHint(GLFW_VISIBLE, desc.visible ? GLFW_TRUE : GLFW_FALSE);
 
     m_window.reset(glfwCreateWindow(desc.width, desc.height, desc.title.c_str(), nullptr, nullptr));
     if (!m_window) {
@@ -177,6 +178,20 @@ bool Window::isMouseButtonDown(const int button) const
 bool Window::isKeyDown(const int key) const
 {
     return glfwGetKey(m_window.get(), key) == GLFW_PRESS;
+}
+
+void Window::setCursorCaptured(const bool captured)
+{
+    GLFWwindow* const window {m_window.get()};
+    glfwSetInputMode(window, GLFW_CURSOR, captured ? GLFW_CURSOR_DISABLED : GLFW_CURSOR_NORMAL);
+    if (glfwRawMouseMotionSupported() == GLFW_TRUE) {
+        glfwSetInputMode(window, GLFW_RAW_MOUSE_MOTION, captured ? GLFW_TRUE : GLFW_FALSE);
+    }
+}
+
+bool Window::isCursorCaptured() const
+{
+    return glfwGetInputMode(m_window.get(), GLFW_CURSOR) == GLFW_CURSOR_DISABLED;
 }
 
 double Window::takeScroll()

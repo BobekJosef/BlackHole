@@ -39,6 +39,7 @@ blackhole_configure_target(bh_presets)
 add_executable(blackhole
     main.cpp
     app/Application.cpp
+    app/Validation.cpp
     gfx/GlDebug.cpp
     gfx/GpuTimer.cpp
     gfx/ShaderProgram.cpp

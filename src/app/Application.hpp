@@ -21,11 +21,18 @@
 
 namespace bh {
 
+struct ApplicationOptions {
+    bool hiddenWindow {}; // for --validate: a GL context, nothing on screen
+};
+
 class Application final {
 public:
-    Application();
+    explicit Application(const ApplicationOptions& options = {});
 
     void run();
+    // blackhole --validate: traces fixed scenes on the GPU and with the CPU reference, prints the
+    // comparison; 0 if every scene passes.
+    [[nodiscard]] int validate();
 
 private:
     void handleInput();
@@ -68,7 +75,7 @@ private:
     glm::dvec2 m_lastCursor {};
     bool m_vsync {true};
     bool m_fullscreenKeyWasDown {};
-    bool m_escapeLeftFullscreen {}; // Esc still held after leaving fullscreen: do not also quit
+    bool m_escapeLeftFullscreen {}; // Esc still held after it did something else: do not also quit
     bool m_reloadKeyWasDown {};
     bool m_middleButtonWasDown {};
     bool m_rightButtonWasDown {};

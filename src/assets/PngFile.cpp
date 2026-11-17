@@ -14,10 +14,10 @@ std::expected<void, std::string> writePng(const std::filesystem::path& path, con
     constexpr int channels = 4;
     if (image.width <= 0 || image.height <= 0
         || image.pixels.size()
-               != static_cast<std::size_t>(channels) * static_cast<std::size_t>(image.width)
-                      * static_cast<std::size_t>(image.height)) {
-        return std::unexpected {std::format("{}: invalid {}x{} image", path.filename().string(), image.width,
-                                            image.height)};
+            != static_cast<std::size_t>(channels) * static_cast<std::size_t>(image.width)
+                * static_cast<std::size_t>(image.height)) {
+        return std::unexpected {
+            std::format("{}: invalid {}x{} image", path.filename().string(), image.width, image.height)};
     }
     std::error_code error {};
     if (path.has_parent_path()) {

@@ -28,7 +28,7 @@ void drawShadowOutline(const std::vector<kerr::ShadowPoint>& outline, const doub
     }
     if (points.size() > 1) {
         ImGui::GetBackgroundDrawList()->AddPolyline(points.data(), static_cast<int>(points.size()),
-                                                    IM_COL32(80, 255, 120, 220), ImDrawFlags_Closed, 1.5F);
+                                                    IM_COL32(80, 255, 120, 220), 1.5F, ImDrawFlags_Closed);
     }
 }
 

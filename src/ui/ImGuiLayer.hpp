@@ -17,12 +17,16 @@ public:
     ImGuiLayer(ImGuiLayer&&) = delete;
     ImGuiLayer& operator=(ImGuiLayer&&) = delete;
 
-    // Scales the whole UI (sizes, and the font re-rasterised at the new size so it stays sharp), e.g. by the
-    // monitor's content scale. Takes effect at the next beginFrame(); cheap when unchanged.
+    // Scales the whole UI (sizes and font, which stays sharp: it is rasterised at the size drawn), e.g. by
+    // the monitor's content scale. Takes effect at the next beginFrame(); cheap when unchanged.
     void setScale(float scale);
 
     void beginFrame();
     void endFrame();
+
+    // Off while the cursor is captured (hidden, unbounded): its virtual position must not hover or click
+    // the panel. Dear ImGui's GLFW backend leaves that to the application.
+    void setMouseEnabled(bool enabled);
 
     // True while ImGui uses the input, so the camera must ignore it.
     [[nodiscard]] bool wantsMouse() const;

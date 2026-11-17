@@ -16,8 +16,11 @@ namespace bh {
 namespace {
 
 constexpr std::array<const char*, 4> toneMapperNames {"AgX", "ACES (Hill fit)", "Exponential", "Clamp (none)"};
-constexpr std::array<const char*, 6> debugViewNames {"None", "Step count", "Constraint |H| / p^2",
-                                                     "Fate (captured/sky/disk/limit)", "Redshift g (disk)",
+constexpr std::array<const char*, 6> debugViewNames {"None",
+                                                     "Step count",
+                                                     "Constraint |H| / p^2",
+                                                     "Fate (captured/sky/disk/limit)",
+                                                     "Redshift g (disk)",
                                                      "Magnification (sky)"};
 constexpr float panelWidth = 360.0F;   // at the default font
 constexpr float panelFontSize = 13.0F; // Dear ImGui's default font size
@@ -82,7 +85,6 @@ void drawImageSettings(SceneSettings& settings, const PanelInfo& info)
     ImGui::EndDisabled();
 }
 
-
 } // namespace
 
 void ControlPanel::drawPerformance(SceneSettings& settings, const PanelInfo& info)
@@ -133,7 +135,7 @@ void ControlPanel::drawPresets(const PanelInfo& info, PanelActions& actions)
                           "keys left out of a hand-written one take their defaults).");
     if (!info.presetStatus.empty()) {
         const ImVec4 color {info.presetError ? ImVec4 {1.0F, 0.4F, 0.4F, 1.0F}
-                                              : ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled)};
+                                             : ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled)};
         ImGui::PushStyleColor(ImGuiCol_Text, color);
         ImGui::TextWrapped("%.*s", static_cast<int>(info.presetStatus.size()), info.presetStatus.data());
         ImGui::PopStyleColor();
@@ -212,7 +214,8 @@ void ControlPanel::drawBackground(SceneSettings& settings, const PanelInfo& info
         ImGui::SetItemTooltip("Equirectangular .hdr/.png/.jpg (2:1), or a folder of six cube faces\n"
                               "(px nx py ny pz nz). Relative paths are looked up in assets/ too.");
         if (!info.skyStatus.empty()) {
-            const ImVec4 color {info.skyError ? ImVec4 {1.0F, 0.4F, 0.4F, 1.0F} : ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled)};
+            const ImVec4 color {info.skyError ? ImVec4 {1.0F, 0.4F, 0.4F, 1.0F}
+                                              : ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled)};
             ImGui::PushStyleColor(ImGuiCol_Text, color);
             ImGui::TextWrapped("%.*s", static_cast<int>(info.skyStatus.size()), info.skyStatus.data());
             ImGui::PopStyleColor();
@@ -267,7 +270,8 @@ PanelActions ControlPanel::draw(SceneSettings& settings, const PanelInfo& info)
         ImGui::Checkbox("Show disk", &settings.diskEnabled);
         ImGui::SliderFloat("Outer radius", &settings.diskOuterRadius, 10.0F, 1000.0F, "%.0f M",
                            ImGuiSliderFlags_Logarithmic);
-        ImGui::SetItemTooltip("Real disks extend far out and fade as they cool (T ~ r^-3/4); a small radius cuts them.");
+        ImGui::SetItemTooltip(
+            "Real disks extend far out and fade as they cool (T ~ r^-3/4); a small radius cuts them.");
         ImGui::SliderFloat("Edge softness", &settings.diskEdgeSoftness, 0.0F, 1.0F, "%.2f r_out");
         ImGui::SetItemTooltip("The outer disk thins out over this fraction of its radius: it turns transparent\n"
                               "(optical depth -> 0) and blends into the sky instead of ending. 0 = sharp edge.");
@@ -323,7 +327,7 @@ PanelActions ControlPanel::draw(SceneSettings& settings, const PanelInfo& info)
         ImGui::SetItemTooltip("Jittered frames averaged per screenshot (anti-aliasing); time grows with it.");
         if (!info.screenshotStatus.empty()) {
             const ImVec4 color {info.screenshotError ? ImVec4 {1.0F, 0.4F, 0.4F, 1.0F}
-                                                      : ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled)};
+                                                     : ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled)};
             ImGui::PushStyleColor(ImGuiCol_Text, color);
             ImGui::TextWrapped("%.*s", static_cast<int>(info.screenshotStatus.size()), info.screenshotStatus.data());
             ImGui::PopStyleColor();

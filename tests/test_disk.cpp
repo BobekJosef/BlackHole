@@ -6,6 +6,7 @@
 //  - black-body colours: near white at 6500 K, red when cool, blue when hot, Rayleigh-Jeans
 //    luminance ~T at high temperature.
 
+#include "Check.hpp"
 #include "physics/Blackbody.hpp"
 #include "physics/Disk.hpp"
 #include "physics/Geodesic.hpp"
@@ -14,35 +15,16 @@
 
 #include <algorithm>
 #include <cmath>
-#include <iostream>
 #include <numbers>
 #include <source_location>
 #include <string_view>
 
 namespace {
 
+using bh::test::expect;
+using bh::test::expectRelative;
+
 namespace kerr = bh::kerr;
-
-int g_failures {0};
-
-void expect(const bool condition, const std::string_view what,
-            const std::source_location where = std::source_location::current())
-{
-    if (!condition) {
-        ++g_failures;
-        std::cerr << where.file_name() << ':' << where.line() << ": " << what << '\n';
-    }
-}
-
-void expectRelative(const double actual, const double expected, const double tolerance, const std::string_view what,
-                    const std::source_location where = std::source_location::current())
-{
-    if (!(std::abs(actual - expected) <= tolerance * std::abs(expected))) { // NaN fails
-        ++g_failures;
-        std::cerr << where.file_name() << ':' << where.line() << ": " << what << ": got " << actual << ", expected "
-                  << expected << " (relative tolerance " << tolerance << ")\n";
-    }
-}
 
 // Specific energy, angular momentum and angular velocity of a prograde circular equatorial
 // geodesic for signed spin s (retrograde orbits are s < 0), BPT 1972 eq. 2.12-2.13, M = 1.
@@ -96,9 +78,9 @@ void testNovikovThorne()
         double a {};
         kerr::Orbit orbit {};
     };
-    for (const auto& [a, orbit] : {Case {0.0, kerr::Orbit::PROGRADE}, Case {0.5, kerr::Orbit::PROGRADE},
-                                   Case {0.9, kerr::Orbit::PROGRADE}, Case {0.998, kerr::Orbit::PROGRADE},
-                                   Case {0.9, kerr::Orbit::RETROGRADE}}) {
+    for (const auto& [a, orbit] :
+         {Case {0.0, kerr::Orbit::PROGRADE}, Case {0.5, kerr::Orbit::PROGRADE}, Case {0.9, kerr::Orbit::PROGRADE},
+          Case {0.998, kerr::Orbit::PROGRADE}, Case {0.9, kerr::Orbit::RETROGRADE}}) {
         const double rIsco {kerr::iscoRadius(a, orbit)};
         const double s {orbit == kerr::Orbit::PROGRADE ? a : -a};
         expect(kerr::novikovThorneFlux(rIsco, a, orbit) == 0.0, "zero torque: F(r_ISCO) = 0");
@@ -140,8 +122,8 @@ void testRedshift()
         double a {};
         kerr::Orbit orbit {};
     };
-    for (const auto& [a, orbit] : {Case {0.9, kerr::Orbit::PROGRADE}, Case {0.9, kerr::Orbit::RETROGRADE},
-                                   Case {0.3, kerr::Orbit::PROGRADE}}) {
+    for (const auto& [a, orbit] :
+         {Case {0.9, kerr::Orbit::PROGRADE}, Case {0.9, kerr::Orbit::RETROGRADE}, Case {0.3, kerr::Orbit::PROGRADE}}) {
         const double r {1.3 * kerr::iscoRadius(a, orbit)};
         const double rho {std::sqrt(r * r + a * a)}; // on the equator x^2 + y^2 = r^2 + a^2
         const kerr::ThreeVector position {rho * std::cos(0.7), rho * std::sin(0.7), 0.0};
@@ -155,7 +137,8 @@ void testRedshift()
         const kerr::Tetrad zamo {kerr::zamoTetrad(position, {1.0, 0.0, 0.0}, {0.0, 1.0, 0.0}, {0.0, 0.0, 1.0}, a)};
 
         for (const kerr::ThreeVector& direction :
-             {kerr::ThreeVector {0.3, -0.8, 0.5}, kerr::ThreeVector {-0.6, 0.2, -0.7}, kerr::ThreeVector {0.0, 0.0, 1.0}}) {
+             {kerr::ThreeVector {0.3, -0.8, 0.5}, kerr::ThreeVector {-0.6, 0.2, -0.7},
+              kerr::ThreeVector {0.0, 0.0, 1.0}}) {
             const kerr::Photon photon {kerr::photonAlong(position, direction, 1.3, a)};
             const kerr::FourVector p {photon.pt, photon.momentum[0], photon.momentum[1], photon.momentum[2]};
             const auto contract = [&p](const kerr::FourVector& v) {
@@ -192,8 +175,8 @@ void testLimbDarkening()
         integral += weight * kerr::electronScatteringLimbDarkening(mu) * mu;
     }
     expectRelative(integral / (3.0 * intervals), 0.5, 1e-12, "limb darkening conserves the flux");
-    expectRelative(kerr::electronScatteringLimbDarkening(1.0) / kerr::electronScatteringLimbDarkening(0.0), 3.06,
-                   1e-12, "I(1) / I(0) = 3.06");
+    expectRelative(kerr::electronScatteringLimbDarkening(1.0) / kerr::electronScatteringLimbDarkening(0.0), 3.06, 1e-12,
+                   "I(1) / I(0) = 3.06");
 }
 
 void testEdgeOpacity()
@@ -237,18 +220,27 @@ void testBlackbody()
 
 } // namespace
 
-int main()
+TEST_CASE("Novikov-Thorne flux: closed form vs Page-Thorne integral, limits")
 {
     testNovikovThorne();
-    testRedshift();
-    testLimbDarkening();
-    testEdgeOpacity();
-    testBlackbody();
+}
 
-    if (g_failures != 0) {
-        std::cerr << g_failures << " check(s) failed\n";
-        return 1;
-    }
-    std::cout << "all disk checks passed\n";
-    return 0;
+TEST_CASE("redshift g against explicit contractions")
+{
+    testRedshift();
+}
+
+TEST_CASE("limb darkening conserves the flux")
+{
+    testLimbDarkening();
+}
+
+TEST_CASE("soft outer edge: slab transfer")
+{
+    testEdgeOpacity();
+}
+
+TEST_CASE("black-body colours")
+{
+    testBlackbody();
 }

@@ -1,5 +1,6 @@
 #include "app/Application.hpp"
 
+#include "app/Validation.hpp"
 #include "blackhole/config.hpp"
 #include "physics/Blackbody.hpp"
 #include "physics/Disk.hpp"
@@ -18,8 +19,10 @@
 #include <array>
 #include <chrono>
 #include <cmath>
+#include <csignal>
 #include <filesystem>
 #include <format>
+#include <iostream>
 #include <optional>
 #include <system_error>
 #include <utility>
@@ -33,6 +36,9 @@ namespace {
 constexpr double frameTimeSmoothing = 0.05;
 constexpr double shaderPollSeconds = 1.0;
 constexpr double doubleClickSeconds = 0.3; // as Dear ImGui's default
+// Orbiting latched by a wheel click turns slower than a drag: the hand moves freely, without a button
+// held and without screen edges, so the same speed felt too twitchy.
+constexpr float latchedOrbitSensitivity = 0.35F;
 // Rays count as captured just outside the horizon (the backward integration slows down there).
 constexpr double captureMargin = 1.01;
 // Sky lookup radius. In outgoing Kerr-Schild coordinates a ray's coordinate direction is within
@@ -53,6 +59,15 @@ constexpr std::size_t diskProfileSamples = 2048;
 // Rays must reach the whole disk before they count as escaped.
 constexpr double escapeRadiusPerDiskRadius = 1.05;
 
+// Set by SIGINT / SIGTERM (Ctrl+C in the terminal): the frame loop then closes the window and the app
+// exits normally (destructors run, sanitizers report).
+volatile std::sig_atomic_t g_stopRequested {0};
+
+void requestStop(const int /*signal*/)
+{
+    g_stopRequested = 1;
+}
+
 [[nodiscard]] kerr::ThreeVector toDouble(const glm::vec3& v)
 {
     return {static_cast<double>(v.x), static_cast<double>(v.y), static_cast<double>(v.z)};
@@ -64,8 +79,8 @@ constexpr double escapeRadiusPerDiskRadius = 1.05;
                                     const std::optional<kerr::FourVector>& velocity, const double a)
 {
     const kerr::ThreeVector x {toDouble(position)};
-    const kerr::Tetrad tetrad {kerr::observerTetrad(x, velocity.value_or(kerr::zamoVelocity(x, a)),
-                                                    toDouble(basis[0]), toDouble(basis[1]), toDouble(basis[2]), a)};
+    const kerr::Tetrad tetrad {kerr::observerTetrad(x, velocity.value_or(kerr::zamoVelocity(x, a)), toDouble(basis[0]),
+                                                    toDouble(basis[1]), toDouble(basis[2]), a)};
     const kerr::Metric g {kerr::metric(x, a)};
     glm::mat4 frame {};
     const std::array columns {tetrad.time, tetrad.right, tetrad.up, tetrad.forward};
@@ -84,8 +99,8 @@ constexpr double escapeRadiusPerDiskRadius = 1.05;
 {
     const SkyFace& face {image.faces.front()};
     const bool cube {image.projection == SkyProjection::CUBEMAP};
-    return std::format("{}: {} {}x{}, {}", path.filename().string(), cube ? "cube map" : "equirectangular",
-                       face.width, face.height, face.isHdr() ? "linear float" : "8-bit sRGB");
+    return std::format("{}: {} {}x{}, {}", path.filename().string(), cube ? "cube map" : "equirectangular", face.width,
+                       face.height, face.isHdr() ? "linear float" : "8-bit sRGB");
 }
 
 // A relative path that does not exist from the working directory is looked up in the asset folder.
@@ -134,10 +149,11 @@ constexpr double escapeRadiusPerDiskRadius = 1.05;
 
 } // namespace
 
-Application::Application()
+Application::Application(const ApplicationOptions& options)
     : m_window {WindowDesc {.title = std::format("BlackHole {}", config::projectVersion),
                             .vsync = true,
-                            .debugContext = config::debugBuild}}
+                            .debugContext = config::debugBuild,
+                            .visible = !options.hiddenWindow}}
     , m_gui {m_window.handle()}
     , m_renderer {std::filesystem::path {config::shaderDir}}
     , m_gpuTimer {gpuPassNames.size()}
@@ -150,9 +166,16 @@ Application::Application()
 
 void Application::run()
 {
+    // Should installing a handler fail, Ctrl+C still ends the app, only without the orderly shutdown.
+    static_cast<void>(std::signal(SIGINT, requestStop));
+    static_cast<void>(std::signal(SIGTERM, requestStop));
     double lastTime {glfwGetTime()};
     while (!m_window.shouldClose()) {
         glfwPollEvents();
+        if (g_stopRequested != 0) {
+            m_window.requestClose();
+            continue;
+        }
 
         const glm::ivec2 framebuffer {m_window.framebufferSize()};
         if (framebuffer.x <= 0 || framebuffer.y <= 0) { // minimised
@@ -184,8 +207,8 @@ void Application::run()
                         .accumulatedSamples = m_renderer.accumulatedSamples(),
                         .observerRadius = kerr::boyerLindquistRadius(observerPosition, a),
                         .observerSpeed = observer.velocity
-                                             ? kerr::speedRelativeToZamo(observerPosition, *observer.velocity, a)
-                                             : 0.0,
+                            ? kerr::speedRelativeToZamo(observerPosition, *observer.velocity, a)
+                            : 0.0,
                         .properTime = m_fall ? std::optional<double> {m_fallProperTime} : std::nullopt,
                         .circularSpeed = circularSpeed,
                         .observerNote = m_observerNote,
@@ -252,6 +275,73 @@ void Application::run()
     }
 }
 
+int Application::validate()
+{
+    struct Scene {
+        std::string_view name {};
+        float spin {};
+        CameraPlacement camera {};
+        float diskOuterRadius {};
+    };
+    const std::array scenes {
+        Scene {.name = "Kerr a = 0.9, nearly edge-on, 30 M",
+               .spin = 0.9F,
+               .camera = CameraPlacement {.polarDegrees = 80.0F, .distance = 30.0F},
+               .diskOuterRadius = 20.0F},
+        Scene {.name = "Kerr a = 0.5, nearly face-on, 25 M",
+               .spin = 0.5F,
+               .camera = CameraPlacement {.azimuthDegrees = 40.0F, .polarDegrees = 15.0F, .distance = 25.0F},
+               .diskOuterRadius = 30.0F},
+        Scene {.name = "Schwarzschild, edge-on, 12 M",
+               .spin = 0.0F,
+               .camera = CameraPlacement {.polarDegrees = 88.0F, .distance = 12.0F},
+               .diskOuterRadius = 40.0F},
+    };
+    constexpr glm::ivec2 size {160, 90};
+
+    bool allPassed {true};
+    for (const Scene& scene : scenes) {
+        m_settings = SceneSettings {};
+        m_settings.spin = scene.spin;
+        m_settings.diskOuterRadius = scene.diskOuterRadius;
+        m_settings.diskEdgeSoftness = 0.0F; // an opaque disk, as in the reference
+        m_camera.place(scene.camera);
+        updateDiskProfile();
+        const FrameParams frame {frameParams(size)};
+        const std::vector<glm::vec4> gpu {m_renderer.traceForValidation(frame)};
+
+        // The reference gets the same (float) inputs, in double.
+        const double a {static_cast<double>(frame.spin)};
+        const ObserverState observer {observerState()};
+        const kerr::ThreeVector position {toDouble(observer.position)};
+        const ReferenceSetup setup {
+            .spin = a,
+            .cameraPosition = position,
+            .cameraTetrad = kerr::zamoTetrad(position, toDouble(observer.basis[0]), toDouble(observer.basis[1]),
+                                             toDouble(observer.basis[2]), a),
+            .tanHalfFov = static_cast<double>(frame.tanHalfFov),
+            .width = size.x,
+            .height = size.y,
+            .trace =
+                kerr::TraceSettings {
+                    .stepScale = static_cast<double>(frame.stepScale),
+                    .maxStepFraction = static_cast<double>(frame.maxStepFraction),
+                    .maxSteps = frame.maxSteps,
+                    .escapeRadius = static_cast<double>(frame.escapeRadius),
+                    .horizonMargin = static_cast<double>(frame.captureRadius) / kerr::outerHorizonRadius(a),
+                    .disk = kerr::DiskExtent {.innerRadius = static_cast<double>(frame.diskInnerRadius),
+                                              .outerRadius = static_cast<double>(frame.diskOuterRadius)}},
+        };
+        const ValidationResult result {compareWithReference(scene.name, setup, gpu)};
+        std::cout << result.report;
+        allPassed = allPassed && result.passed;
+    }
+    // Flushed: a sanitizer ending the process at exit would drop buffered output.
+    std::cout << (allPassed ? "validation passed" : "validation FAILED") << '\n';
+    std::cout.flush();
+    return allPassed ? 0 : 1;
+}
+
 void Application::handleInput()
 {
     const glm::dvec2 cursor {m_window.cursorPosition()};
@@ -259,7 +349,8 @@ void Application::handleInput()
     m_lastCursor = cursor;
 
     // A click of the wheel (middle button) latches orbiting on, as if the left button were held, until
-    // the next wheel click or a left click.
+    // the next wheel click, a left click or Esc. While latched the cursor is captured: hidden, and not
+    // stopped by the screen edges.
     const bool leftDown {m_window.isMouseButtonDown(GLFW_MOUSE_BUTTON_LEFT)};
     const bool middleDown {m_window.isMouseButtonDown(GLFW_MOUSE_BUTTON_MIDDLE)};
     const bool middlePressed {middleDown && !m_middleButtonWasDown};
@@ -289,18 +380,26 @@ void Application::handleInput()
         if (leftDown) {
             m_orbitLatched = false;
         }
-        if (leftDown || m_orbitLatched) {
+        if (leftDown) {
             m_camera.orbit(glm::vec2 {delta});
+        } else if (m_orbitLatched) {
+            m_camera.orbit(latchedOrbitSensitivity * glm::vec2 {delta});
         }
         m_camera.zoom(m_window.takeScroll());
     } else {
         static_cast<void>(m_window.takeScroll()); // the scroll belonged to an ImGui window
+        if (m_settings.observer == Observer::FREE_FALL) {
+            m_orbitLatched = false; // a falling camera cannot be orbited
+        }
     }
 
     if (!m_gui.wantsKeyboard()) {
-        // Esc leaves fullscreen first, and quits from a window.
+        // Esc releases a latched orbit (and the cursor) first, then leaves fullscreen, then quits.
         if (m_window.isKeyDown(GLFW_KEY_ESCAPE)) {
-            if (m_settings.fullscreen) {
+            if (m_orbitLatched) {
+                m_orbitLatched = false;
+                m_escapeLeftFullscreen = true; // the same press must not also go on to quit
+            } else if (m_settings.fullscreen) {
                 m_settings.fullscreen = false;
                 m_escapeLeftFullscreen = true;
             } else if (!m_escapeLeftFullscreen) {
@@ -326,6 +425,12 @@ void Application::handleInput()
         }
         m_reloadKeyWasDown = reloadKeyDown;
     }
+
+    if (m_orbitLatched != m_window.isCursorCaptured()) {
+        m_window.setCursorCaptured(m_orbitLatched);
+        m_gui.setMouseEnabled(!m_orbitLatched);
+        m_lastCursor = m_window.cursorPosition(); // capturing moves the reported position: no jump
+    }
 }
 
 FrameParams Application::frameParams(const glm::ivec2 framebufferSize) const
@@ -333,9 +438,8 @@ FrameParams Application::frameParams(const glm::ivec2 framebufferSize) const
     const double a {static_cast<double>(m_settings.spin)};
     const ObserverState observer {observerState()};
     const glm::vec3 position {observer.position};
-    const double diskReach {m_settings.diskEnabled
-                                ? escapeRadiusPerDiskRadius * static_cast<double>(m_settings.diskOuterRadius)
-                                : 0.0};
+    const double diskReach {
+        m_settings.diskEnabled ? escapeRadiusPerDiskRadius * static_cast<double>(m_settings.diskOuterRadius) : 0.0};
     return FrameParams {
         .outputSize = framebufferSize,
         .renderScale = m_settings.renderScale,
@@ -348,7 +452,8 @@ FrameParams Application::frameParams(const glm::ivec2 framebufferSize) const
         .diskInnerRadius = static_cast<float>(kerr::iscoRadius(a, m_settings.diskOrbit)),
         .diskOuterRadius = m_settings.diskOuterRadius,
         .diskPeakTemperature = m_settings.diskPeakTemperature,
-        .diskBrightness = static_cast<float>(1.0 / blackbodyLuminance(static_cast<double>(m_settings.diskPeakTemperature))),
+        .diskBrightness =
+            static_cast<float>(1.0 / blackbodyLuminance(static_cast<double>(m_settings.diskPeakTemperature))),
         .diskOrbitSign = m_settings.diskOrbit == kerr::Orbit::PROGRADE ? 1.0F : -1.0F,
         .dopplerShift = m_settings.dopplerShift,
         .gravitationalRedshift = m_settings.gravitationalRedshift,
@@ -357,13 +462,13 @@ FrameParams Application::frameParams(const glm::ivec2 framebufferSize) const
         .diskEddySize = m_settings.diskEddySize,
         .diskEdgeSoftness = m_settings.diskEdgeSoftness,
         // The clock only drives the turbulence; without it a still view keeps accumulating.
-        .time = m_settings.diskEnabled && m_settings.diskTurbulence > 0.0F ? static_cast<float>(m_coordinateTime)
-                                                                           : 0.0F,
+        .time =
+            m_settings.diskEnabled && m_settings.diskTurbulence > 0.0F ? static_cast<float>(m_coordinateTime) : 0.0F,
         .sky = frameSky(m_settings.background, m_renderer.skyProjection()),
         // Yaw about the spin axis, then tilt about x.
-        .skyRotation = glm::mat3 {glm::rotate(glm::rotate(glm::mat4 {1.0F}, glm::radians(m_settings.skyTiltDegrees),
-                                                          glm::vec3 {1.0F, 0.0F, 0.0F}),
-                                              glm::radians(m_settings.skyYawDegrees), glm::vec3 {0.0F, 0.0F, 1.0F})},
+        .skyRotation = glm::mat3 {glm::rotate(
+            glm::rotate(glm::mat4 {1.0F}, glm::radians(m_settings.skyTiltDegrees), glm::vec3 {1.0F, 0.0F, 0.0F}),
+            glm::radians(m_settings.skyYawDegrees), glm::vec3 {0.0F, 0.0F, 1.0F})},
         .skyBrightness = std::exp2(m_settings.skyBrightnessEv),
         .stepScale = m_settings.stepScale,
         .maxStepFraction = m_settings.maxStepFraction,
@@ -383,8 +488,8 @@ FrameParams Application::frameParams(const glm::ivec2 framebufferSize) const
 
 void Application::updateDiskProfile()
 {
-    const DiskProfileKey key {.spin = m_settings.spin, .orbit = m_settings.diskOrbit,
-                              .outerRadius = m_settings.diskOuterRadius};
+    const DiskProfileKey key {
+        .spin = m_settings.spin, .orbit = m_settings.diskOrbit, .outerRadius = m_settings.diskOuterRadius};
     if (key == m_diskProfileKey) {
         return;
     }
@@ -415,9 +520,8 @@ void Application::updateSkyImage()
     m_requestedSkyImage = m_settings.skyImage;
     m_skyStatus = std::format("Loading {}...", m_requestedSkyImage.filename().string());
     m_skyError = false;
-    m_skyLoad = std::async(std::launch::async, [path = resolveAssetPath(m_requestedSkyImage)] {
-        return loadSkyImage(path);
-    });
+    m_skyLoad =
+        std::async(std::launch::async, [path = resolveAssetPath(m_requestedSkyImage)] { return loadSkyImage(path); });
 }
 
 auto Application::observerState() const -> ObserverState
@@ -427,7 +531,8 @@ auto Application::observerState() const -> ObserverState
         const auto& [x, y, z] {m_fall->position};
         const glm::vec3 position {static_cast<float>(x), static_cast<float>(y), static_cast<float>(z)};
         return ObserverState {.position = position,
-                              .basis = m_camera.applyLook(OrbitCamera::lookAlong(-radialDirection(m_fall->position, a))),
+                              .basis =
+                                  m_camera.applyLook(OrbitCamera::lookAlong(-radialDirection(m_fall->position, a))),
                               .velocity = kerr::observerVelocity(*m_fall, a)};
     }
     ObserverState state {
@@ -459,8 +564,7 @@ void Application::updateObserver(const double seconds, const bool dropAgain)
     }
 
     switch (m_settings.observer) {
-    case Observer::STATIC:
-        break;
+    case Observer::STATIC: break;
     case Observer::ORBITING: {
         // Carried around at Omega in coordinate time, the clock the disk turns on too.
         const kerr::ThreeVector position {toDouble(m_camera.position())};
@@ -476,7 +580,8 @@ void Application::updateObserver(const double seconds, const bool dropAgain)
     case Observer::FREE_FALL: {
         // Dropped from the orbit camera's place; the clock runs in the camera's proper time.
         if (!m_fall || dropAgain || m_fallSpin != m_settings.spin || m_fallSpeed != m_settings.fallSpeed) {
-            m_fall = kerr::launchedFromZamo(toDouble(m_camera.position()), a, static_cast<double>(m_settings.fallSpeed));
+            m_fall =
+                kerr::launchedFromZamo(toDouble(m_camera.position()), a, static_cast<double>(m_settings.fallSpeed));
             m_fallProperTime = 0.0;
             m_fallSpin = m_settings.spin;
             m_fallSpeed = m_settings.fallSpeed;
@@ -521,18 +626,18 @@ void Application::takeScreenshot(const glm::ivec2 windowSize)
         return;
     }
     if (m_screenshotSave.valid()) {
-        static_cast<void>(m_screenshotSave.get()); // one save at a time; rare, and its result is superseded
+        m_screenshotSave.wait(); // one save at a time; rare, and its result is superseded by this one
     }
     const std::filesystem::path path {timestampedPath(std::filesystem::path {config::screenshotDir}, "blackhole")};
     m_screenshotStatus = std::format("Saving {} ({}x{})...", path.filename().string(), size.x, size.y);
     m_screenshotError = false;
-    m_screenshotSave = std::async(std::launch::async, [path, image = std::move(*image)]
-                                  -> std::expected<std::filesystem::path, std::string> {
-        if (auto written {writePng(path, image)}; !written) {
-            return std::unexpected {std::move(written.error())};
-        }
-        return path;
-    });
+    m_screenshotSave = std::async(
+        std::launch::async, [path, image = std::move(*image)] -> std::expected<std::filesystem::path, std::string> {
+            if (auto written {writePng(path, image)}; !written) {
+                return std::unexpected {std::move(written.error())};
+            }
+            return path;
+        });
 }
 
 void Application::updateScreenshotStatus()

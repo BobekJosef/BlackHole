@@ -3,26 +3,17 @@
 // lines and out-of-range values are errors naming the line, unknown keys are warnings, and every built-in
 // preset in the directory given as argv[1] loads cleanly.
 
+#include "Check.hpp"
 #include "scene/Preset.hpp"
 
 #include <filesystem>
-#include <iostream>
 #include <source_location>
 #include <string>
 #include <string_view>
 
 namespace {
 
-int g_failures {0};
-
-void expect(const bool condition, const std::string_view what,
-            const std::source_location where = std::source_location::current())
-{
-    if (!condition) {
-        ++g_failures;
-        std::cerr << where.file_name() << ':' << where.line() << ": " << what << '\n';
-    }
-}
+using bh::test::expect;
 
 [[nodiscard]] bh::Preset unusual()
 {
@@ -53,8 +44,11 @@ void expect(const bool condition, const std::string_view what,
     s.autoExposure = true;
     s.bloomEnabled = false;
     s.bloomStrength = 0.1F;
-    preset.camera = bh::CameraPlacement {.azimuthDegrees = -33.3F, .polarDegrees = 12.5F, .distance = 7.0F,
-                                         .lookYawDegrees = 20.0F, .lookPitchDegrees = -5.5F};
+    preset.camera = bh::CameraPlacement {.azimuthDegrees = -33.3F,
+                                         .polarDegrees = 12.5F,
+                                         .distance = 7.0F,
+                                         .lookYawDegrees = 20.0F,
+                                         .lookPitchDegrees = -5.5F};
     return preset;
 }
 
@@ -94,8 +88,8 @@ void testDefaultsAndKeptSettings()
 
 void testSyntax()
 {
-    const auto parsed {bh::parsePreset("# comment\r\n\r\n   spin   =  0.25  \r\n# spin = 0.9\nnot.a.key = 3\n",
-                                       bh::Preset {})};
+    const auto parsed {
+        bh::parsePreset("# comment\r\n\r\n   spin   =  0.25  \r\n# spin = 0.9\nnot.a.key = 3\n", bh::Preset {})};
     expect(parsed.has_value() && parsed->preset.settings.spin == 0.25F, "comments, blank lines, spaces, CRLF");
     expect(parsed.has_value() && parsed->warnings.size() == 1
                && parsed->warnings.front().find("line 5") != std::string::npos,
@@ -135,30 +129,30 @@ void testFiles(const std::filesystem::path& builtIn)
     expect(!presets.empty(), "built-in presets exist");
     for (const std::filesystem::path& path : presets) {
         const auto preset {bh::loadPreset(path, bh::Preset {})};
-        expect(preset.has_value(), std::string {"loads: "} + path.filename().string()
-                                       + (preset ? std::string {} : ": " + preset.error()));
+        expect(preset.has_value(),
+               std::string {"loads: "} + path.filename().string() + (preset ? std::string {} : ": " + preset.error()));
         expect(preset.has_value() && preset->warnings.empty(), "no warnings: " + path.filename().string());
     }
 }
 
 } // namespace
 
-int main(const int argc, const char* const* const argv)
+TEST_CASE("format round-trips every field")
 {
-    if (argc != 2) {
-        std::cerr << "usage: test_preset <built-in preset directory>\n";
-        return 2;
-    }
     testRoundTrip();
-    testDefaultsAndKeptSettings();
-    testSyntax();
-    // argv is the C entry point's array: indexing it is the only way in.
-    testFiles(std::filesystem::path {argv[1]});
+}
 
-    if (g_failures != 0) {
-        std::cerr << g_failures << " check(s) failed\n";
-        return 1;
-    }
-    std::cout << "all preset checks passed\n";
-    return 0;
+TEST_CASE("missing keys take defaults, other settings stay")
+{
+    testDefaultsAndKeptSettings();
+}
+
+TEST_CASE("syntax, errors and warnings")
+{
+    testSyntax();
+}
+
+TEST_CASE("files and the built-in presets")
+{
+    testFiles(std::filesystem::path {BLACKHOLE_PRESET_DIR}); // set by CMake
 }

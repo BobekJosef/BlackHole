@@ -19,8 +19,8 @@ radiance image; skipped once 256 samples have converged) → **exposure** (with 
 one metering work group) → **bloom** (compute down/up-sampling chain) → **present** (fragment: up-scale,
 bloom mix, exposure, tone mapping, sRGB). ImGui draws on top. Screenshots run the same passes offscreen.
 
-Stack: C++23, CMake ≥ 3.25, OpenGL 4.3 core, GLFW 3.4, GLAD 2 (vendored), GLM 1.0, Dear ImGui 1.91,
-stb_image.
+Stack: C++23, CMake ≥ 3.25, OpenGL 4.3 core, GLFW 3.5, GLAD 2 (vendored), GLM 1.0, Dear ImGui 1.93,
+stb_image; doctest 2.5 for the tests.
 macOS is unsupported (OpenGL stops at 4.1 there, and compute shaders need 4.3).
 
 ## Build, run, test
@@ -32,8 +32,15 @@ ctest --preset debug
 ./build/debug/src/blackhole
 
 cmake --preset release && cmake --build --preset release -j   # for anything performance-related
-cmake --preset asan    && cmake --build --preset asan -j      # ASan + UBSan
+cmake --preset asan    && cmake --build --preset asan -j      # ASan + UBSan (ctest --preset asan)
+
+./build/release/src/blackhole --validate   # GPU vs CPU reference, hidden window, 0.5 s; exit 0 = agree
+scripts/lint.sh [--fix]                    # clang-format + clang-tidy; must be clean before a commit
 ```
+
+After any change to `trace.comp`, `common/kerr.glsl` or the disk crossing, run `--validate`: it is the check
+that the GLSL copy still matches `kerr::traceRay` (CI cannot, it has no GPU). A real change of the algorithm
+goes into both, `Geodesic.cpp` first.
 
 Run commands from the repository root. Always pass `-j`: the default generator is Make, which builds
 serially otherwise. Running the app opens a window on the user's display: keep such runs short, start the
@@ -82,7 +89,8 @@ src/app/       Application: owns everything, runs the frame loop
 shaders/       main shaders: trace.comp, bloom_*.comp, fullscreen.vert + present.frag
 shaders/common/ shared GLSL headers: frame (UBO), kerr (geodesics), disk (redshift, emission),
                color (tone mapping, sRGB), sky (stars, grid, maps; footprint filtering), random
-tests/         CTest executables (bh_physics, bh_shadertools, bh_assets; no GL context in tests) + GLSL validation
+tests/         doctest suites (no GL context in tests), one CTest entry per TEST_CASE; checks through
+               tests/Check.hpp (expect, expectNear, expectRelative); + offline GLSL validation
 assets/        sky maps, git-ignored (README.md lists sources and licences)
 presets/       built-in presets (tests/test_preset.cpp loads every one: keep them warning-free)
 screenshots/   F12 output, git-ignored
@@ -188,8 +196,10 @@ is converted to GPU quantities in one place (`Application::frameParams`).
   silences a warning. `[[maybe_unused]]` on a parameter a callback signature forces on you needs none.
 - Third-party code is compiled without our flags and included as `SYSTEM`; a warning from it is not ours to fix.
 - The `asan` preset runs AddressSanitizer and UndefinedBehaviorSanitizer; a report there is a bug, not noise.
-  GPU drivers leak at exit, so LeakSanitizer reports that point only into the driver (`radeonsi_dri.so`,
-  `libnvidia-*`) can be suppressed with an LSan suppressions file; anything in our code cannot.
+  GPU drivers leak at exit, so LeakSanitizer reports that point only into the driver can be suppressed in
+  `scripts/lsan.supp` (with a comment naming the leak); anything in our code cannot.
+- `.clang-format` and `.clang-tidy` encode these conventions; `scripts/lint.sh` must be clean. A `NOLINT`
+  follows the suppression rule above (comment why).
 
 ### Language
 

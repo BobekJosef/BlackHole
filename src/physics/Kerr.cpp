@@ -82,7 +82,8 @@ std::vector<ShadowPoint> shadowOutline(const double a, const double inclination,
         for (std::size_t i {0}; i < samples; ++i) {
             const double t {static_cast<double>(i) / static_cast<double>(samples - 1)};
             const auto [xi, eta] {sphericalPhotonOrbit(rPrograde + t * (rRetrograde - rPrograde), a)};
-            const double beta2 {eta + a * a * cosTheta * cosTheta - xi * xi * cosTheta * cosTheta / (sinTheta * sinTheta)};
+            const double beta2 {eta + a * a * cosTheta * cosTheta
+                                - xi * xi * cosTheta * cosTheta / (sinTheta * sinTheta)};
             // Orbits that never reach the observer's latitude (beta^2 < 0) do not bound the shadow. The
             // tolerance keeps the equatorial orbits at the ends, where beta^2 = 0 up to rounding.
             constexpr double roundingTolerance = 1.0e-9;

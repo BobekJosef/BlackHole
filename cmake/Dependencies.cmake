@@ -19,7 +19,7 @@ set(GLFW_BUILD_WAYLAND OFF CACHE BOOL "Build GLFW's native Wayland backend")
 
 FetchContent_Declare(glfw
     GIT_REPOSITORY https://github.com/glfw/glfw.git
-    GIT_TAG 3.4
+    GIT_TAG 3.5.1
     GIT_SHALLOW TRUE
     SYSTEM
     FIND_PACKAGE_ARGS 3.4 NAMES glfw3)
@@ -31,7 +31,7 @@ set(GLM_BUILD_INSTALL OFF CACHE BOOL "" FORCE)
 
 FetchContent_Declare(glm
     GIT_REPOSITORY https://github.com/g-truc/glm.git
-    GIT_TAG 1.0.1
+    GIT_TAG 1.0.3
     GIT_SHALLOW TRUE
     SYSTEM
     FIND_PACKAGE_ARGS 1.0 NAMES glm)
@@ -39,7 +39,7 @@ FetchContent_Declare(glm
 # --- Dear ImGui: control panel ------------------------------------------------
 FetchContent_Declare(imgui
     GIT_REPOSITORY https://github.com/ocornut/imgui.git
-    GIT_TAG v1.91.9b
+    GIT_TAG v1.93.0
     GIT_SHALLOW TRUE)
 
 # --- stb_image / stb_image_write: sky maps in, screenshots out --------------------

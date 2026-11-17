@@ -11,13 +11,19 @@ template <typename Deleter>
 class Object final {
 public:
     Object() = default;
-    explicit Object(const GLuint name) : m_name {name} {}
+    explicit Object(const GLuint name)
+        : m_name {name}
+    {
+    }
 
     ~Object() { reset(); }
 
     Object(const Object&) = delete;
     Object& operator=(const Object&) = delete;
-    Object(Object&& other) noexcept : m_name {std::exchange(other.m_name, 0U)} {}
+    Object(Object&& other) noexcept
+        : m_name {std::exchange(other.m_name, 0U)}
+    {
+    }
     Object& operator=(Object&& other) noexcept
     {
         if (this != &other) {

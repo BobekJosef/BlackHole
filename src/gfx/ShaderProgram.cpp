@@ -89,7 +89,10 @@ std::expected<ShaderProgram, std::string> ShaderProgram::fromFiles(const std::sp
     return ShaderProgram {std::move(program)};
 }
 
-ShaderProgram::ShaderProgram(Program program) : m_program {std::move(program)} {}
+ShaderProgram::ShaderProgram(Program program)
+    : m_program {std::move(program)}
+{
+}
 
 void ShaderProgram::use() const
 {

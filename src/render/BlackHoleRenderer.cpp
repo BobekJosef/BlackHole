@@ -69,7 +69,7 @@ void setLinearClamp(const GLenum target)
 [[nodiscard]] gl::Texture createBlackbodyLut()
 {
     std::vector<float> rgb {};
-    rgb.reserve(3 * blackbodySamples);
+    rgb.reserve(3 * static_cast<std::size_t>(blackbodySamples));
     for (int i {0}; i < blackbodySamples; ++i) {
         const double logT {static_cast<double>(blackbodyLogTMin)
                            + static_cast<double>(blackbodyLogTMax - blackbodyLogTMin) * i / (blackbodySamples - 1)};
@@ -90,14 +90,13 @@ void setLinearClamp(const GLenum target)
 {
     GLint count {};
     glGetIntegerv(GL_NUM_EXTENSIONS, &count);
-    const bool supported {GLAD_GL_VERSION_4_6 != 0
-                          || std::ranges::any_of(std::views::iota(0, count), [](const GLint i) {
+    const bool supported {
+        GLAD_GL_VERSION_4_6 != 0 || std::ranges::any_of(std::views::iota(0, count), [](const GLint i) {
                                  // glGetStringi returns const GLubyte*, a NUL-terminated character string.
-                                 const std::string_view name {reinterpret_cast<const char*>(
-                                     glGetStringi(GL_EXTENSIONS, static_cast<GLuint>(i)))};
-                                 return name == "GL_ARB_texture_filter_anisotropic"
-                                     || name == "GL_EXT_texture_filter_anisotropic";
-                             })};
+            const std::string_view name {
+                reinterpret_cast<const char*>(glGetStringi(GL_EXTENSIONS, static_cast<GLuint>(i)))};
+            return name == "GL_ARB_texture_filter_anisotropic" || name == "GL_EXT_texture_filter_anisotropic";
+        })};
     GLfloat value {1.0F};
     if (supported) {
         glGetFloatv(GL_MAX_TEXTURE_MAX_ANISOTROPY, &value);
@@ -308,8 +307,8 @@ void BlackHoleRenderer::resizeTargets(const glm::ivec2 traceSize)
     // else reads level 0.
     gl::Texture radiance {gl::createTexture()};
     glBindTexture(GL_TEXTURE_2D, radiance.get());
-    glTexStorage2D(GL_TEXTURE_2D, std::bit_width(static_cast<unsigned>(std::max(traceSize.x, traceSize.y))),
-                   hdrFormat, traceSize.x, traceSize.y);
+    glTexStorage2D(GL_TEXTURE_2D, std::bit_width(static_cast<unsigned>(std::max(traceSize.x, traceSize.y))), hdrFormat,
+                   traceSize.x, traceSize.y);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_NEAREST);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
@@ -346,8 +345,8 @@ FrameUniforms BlackHoleRenderer::frameUniforms(const FrameParams& frame) const
         .escapeRadius = frame.escapeRadius,
         .maxSteps = static_cast<std::uint32_t>(std::max(frame.maxSteps, 1)),
         .flags = (frame.diskEnabled ? frameFlagDisk : 0U) | (frame.dopplerShift ? frameFlagDoppler : 0U)
-               | (frame.limbDarkening ? frameFlagLimbDarkening : 0U)
-               | (frame.gravitationalRedshift ? frameFlagGravitationalRedshift : 0U),
+            | (frame.limbDarkening ? frameFlagLimbDarkening : 0U)
+            | (frame.gravitationalRedshift ? frameFlagGravitationalRedshift : 0U),
         .debugView = static_cast<std::uint32_t>(std::to_underlying(frame.debugView)),
         .diskPeakTemperature = frame.diskPeakTemperature,
         .diskBrightness = frame.diskBrightness,
@@ -521,6 +520,30 @@ void BlackHoleRenderer::finish(const FrameParams& frame, const GLuint framebuffe
     endSection(timer, GpuPass::PRESENT);
 }
 
+std::vector<glm::vec4> BlackHoleRenderer::traceForValidation(const FrameParams& frame)
+{
+    FrameParams exact {frame};
+    exact.renderScale = 1.0F;
+    exact.accumulate = false;
+    prepare(exact);
+    const glm::ivec2 size {m_radiance.size};
+
+    const gl::Texture output {gl::createTexture()};
+    glBindTexture(GL_TEXTURE_2D, output.get());
+    glTexStorage2D(GL_TEXTURE_2D, 1, GL_RGBA32F, size.x, size.y);
+    glBindImageTexture(2, output.get(), 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_RGBA32F);
+    m_programs.trace.set("uValidate", true);
+    trace(glm::vec2 {0.0F}, false);
+    m_programs.trace.set("uValidate", false);
+    m_traced.reset(); // the interactive view starts over
+
+    std::vector<glm::vec4> pixels(static_cast<std::size_t>(size.x) * static_cast<std::size_t>(size.y));
+    glBindTexture(GL_TEXTURE_2D, output.get());
+    glPixelStorei(GL_PACK_ALIGNMENT, 4);
+    glGetTexImage(GL_TEXTURE_2D, 0, GL_RGBA, GL_FLOAT, pixels.data());
+    return pixels;
+}
+
 auto BlackHoleRenderer::renderImage(const FrameParams& frame, const std::uint32_t samples)
     -> std::expected<RgbaImage, std::string>
 {
@@ -528,11 +551,12 @@ auto BlackHoleRenderer::renderImage(const FrameParams& frame, const std::uint32_
     GLint maxSize {};
     glGetIntegerv(GL_MAX_TEXTURE_SIZE, &maxSize);
     if (size.x <= 0 || size.y <= 0 || std::max(size.x, size.y) > maxSize) {
-        return std::unexpected {std::format("{}x{} is not a size this GPU can render (limit {})", size.x, size.y, maxSize)};
+        return std::unexpected {
+            std::format("{}x{} is not a size this GPU can render (limit {})", size.x, size.y, maxSize)};
     }
 
     // present.frag writes sRGB-encoded values itself (as for the window), so a plain RGBA8 target.
-    gl::Texture color {gl::createTexture()};
+    const gl::Texture color {gl::createTexture()};
     glBindTexture(GL_TEXTURE_2D, color.get());
     glTexStorage2D(GL_TEXTURE_2D, 1, GL_RGBA8, size.x, size.y);
     const gl::Framebuffer framebuffer {gl::createFramebuffer()};

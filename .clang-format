@@ -1,0 +1,61 @@
+# The code style of CLAUDE.md ("Style"): 4 spaces, 120 columns, braces on the same line except for function
+# definitions, `T x {init}` brace initialisation, constructor initialisers broken before the comma.
+# clang-format 18 or newer.
+Language: Cpp
+BasedOnStyle: LLVM
+Standard: c++20
+ColumnLimit: 120
+IndentWidth: 4
+TabWidth: 4
+UseTab: Never
+AccessModifierOffset: -4
+NamespaceIndentation: None
+FixNamespaceComments: true
+IndentCaseLabels: false
+BreakBeforeBraces: Custom
+BraceWrapping:
+  AfterFunction: true
+  AfterClass: false
+  AfterStruct: false
+  AfterEnum: false
+  AfterNamespace: false
+  AfterControlStatement: Never
+  BeforeElse: false
+  BeforeCatch: false
+  BeforeLambdaBody: false
+  SplitEmptyFunction: true
+  SplitEmptyRecord: false
+AllowShortFunctionsOnASingleLine: Inline
+AllowShortIfStatementsOnASingleLine: Never
+AllowShortLoopsOnASingleLine: false
+AllowShortBlocksOnASingleLine: Never
+AllowShortCaseLabelsOnASingleLine: true
+AllowShortLambdasOnASingleLine: All
+AllowShortEnumsOnASingleLine: true
+AlwaysBreakTemplateDeclarations: Yes
+RequiresClausePosition: OwnLine
+IndentRequiresClause: true
+BreakConstructorInitializers: BeforeComma
+PackConstructorInitializers: Never
+ConstructorInitializerIndentWidth: 4
+ContinuationIndentWidth: 4
+BreakBeforeBinaryOperators: NonAssignment
+BreakBeforeTernaryOperators: true
+AlignAfterOpenBracket: Align
+AlignOperands: DontAlign
+AlignTrailingComments:
+  Kind: Leave
+BinPackArguments: true
+BinPackParameters: true
+Cpp11BracedListStyle: true
+SpaceBeforeCpp11BracedList: true
+SpaceBeforeParens: ControlStatements
+PointerAlignment: Left
+ReferenceAlignment: Left
+QualifierAlignment: Leave
+SortIncludes: CaseInsensitive
+IncludeBlocks: Preserve
+InsertNewlineAtEOF: true
+KeepEmptyLinesAtTheStartOfBlocks: false
+MaxEmptyLinesToKeep: 1
+ReflowComments: false

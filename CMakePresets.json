@@ -41,7 +41,12 @@
   ],
   "testPresets": [
     { "name": "debug", "configurePreset": "debug", "output": { "outputOnFailure": true } },
-    { "name": "asan", "configurePreset": "asan", "output": { "outputOnFailure": true } },
+    {
+      "name": "asan",
+      "configurePreset": "asan",
+      "output": { "outputOnFailure": true },
+      "environment": { "LSAN_OPTIONS": "suppressions=${sourceDir}/scripts/lsan.supp:print_suppressions=0" }
+    },
     { "name": "release", "configurePreset": "release", "output": { "outputOnFailure": true } }
   ]
 }

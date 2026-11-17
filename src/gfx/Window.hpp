@@ -27,6 +27,7 @@ struct WindowDesc {
     std::string title {"BlackHole"};
     bool vsync {true};
     bool debugContext {false};
+    bool visible {true}; // false: an OpenGL context without a window on screen (validation runs)
 };
 
 // A GLFW window with a current OpenGL 4.3 core context and GLAD loaded.
@@ -57,6 +58,11 @@ public:
     [[nodiscard]] glm::dvec2 cursorPosition() const;
     [[nodiscard]] bool isMouseButtonDown(int button) const;
     [[nodiscard]] bool isKeyDown(int key) const;
+
+    // A captured cursor is hidden and unbounded: cursorPosition() keeps changing past the screen edges
+    // (GLFW_CURSOR_DISABLED), with raw, unaccelerated motion where the platform offers it.
+    void setCursorCaptured(bool captured);
+    [[nodiscard]] bool isCursorCaptured() const;
 
     // Scroll accumulated by the GLFW callback since the last call.
     [[nodiscard]] double takeScroll();

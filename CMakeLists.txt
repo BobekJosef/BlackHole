@@ -17,6 +17,7 @@ endif()
 option(BLACKHOLE_WERROR "Treat compiler warnings as errors" OFF)
 option(BLACKHOLE_SANITIZE "Build with AddressSanitizer and UndefinedBehaviorSanitizer" OFF)
 option(BLACKHOLE_BUILD_TESTS "Build the unit tests" ON)
+option(BLACKHOLE_GPU_TESTS "Also run tests that need a GPU and a display (blackhole --validate)" OFF)
 
 list(APPEND CMAKE_MODULE_PATH "${PROJECT_SOURCE_DIR}/cmake")
 include(ProjectOptions)

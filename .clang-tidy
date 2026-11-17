@@ -1,0 +1,62 @@
+# Static analysis matching CLAUDE.md. Run: clang-tidy -p build/debug <file> (the presets export
+# compile_commands.json). Disabled checks are listed with the convention that overrides them.
+Checks: >
+  -*,
+  bugprone-*,
+  -bugprone-easily-swappable-parameters,
+  cert-err33-c,
+  cppcoreguidelines-init-variables,
+  cppcoreguidelines-no-malloc,
+  cppcoreguidelines-pro-type-cstyle-cast,
+  cppcoreguidelines-pro-type-member-init,
+  cppcoreguidelines-special-member-functions,
+  cppcoreguidelines-virtual-class-destructor,
+  misc-const-correctness,
+  misc-definitions-in-headers,
+  misc-redundant-expression,
+  misc-unused-using-decls,
+  misc-use-anonymous-namespace,
+  modernize-*,
+  -modernize-use-trailing-return-type,
+  -modernize-use-designated-initializers,
+  -modernize-avoid-c-arrays,
+  performance-*,
+  -performance-enum-size,
+  readability-container-size-empty,
+  readability-else-after-return,
+  readability-identifier-naming,
+  readability-implicit-bool-conversion,
+  readability-make-member-function-const,
+  readability-qualified-auto,
+  readability-simplify-boolean-expr
+# modernize-use-trailing-return-type: CLAUDE.md uses trailing return types in two cases only.
+# modernize-use-designated-initializers: used where many fields are set in one place, not everywhere.
+# bugprone-easily-swappable-parameters: physics signatures (r, a) are the notation of the papers.
+# performance-enum-size: enums keep the default underlying type unless they cross into GLSL.
+# (readability-redundant-member-init is off: CLAUDE.md initialises every member where it is declared.)
+WarningsAsErrors: ''
+HeaderFilterRegex: '(src|tests)/.*'
+# The compile database may come from GCC, whose warning flags clang does not know.
+ExtraArgs: ['-Wno-unknown-warning-option']
+CheckOptions:
+  - { key: readability-identifier-naming.ClassCase,                 value: CamelCase }
+  - { key: readability-identifier-naming.StructCase,                value: CamelCase }
+  - { key: readability-identifier-naming.EnumCase,                  value: CamelCase }
+  - { key: readability-identifier-naming.EnumConstantCase,          value: UPPER_CASE }
+  - { key: readability-identifier-naming.FunctionCase,              value: camelBack }
+  - { key: readability-identifier-naming.VariableCase,              value: camelBack }
+  - { key: readability-identifier-naming.ParameterCase,             value: camelBack }
+  - { key: readability-identifier-naming.PrivateMemberPrefix,       value: m_ }
+  - { key: readability-identifier-naming.PrivateMemberCase,         value: camelBack }
+  - { key: readability-identifier-naming.ProtectedMemberPrefix,     value: m_ }
+  - { key: readability-identifier-naming.PublicMemberCase,          value: camelBack }
+  - { key: readability-identifier-naming.GlobalVariablePrefix,      value: g_ }
+  - { key: readability-identifier-naming.GlobalConstantCase,        value: camelBack }
+  - { key: readability-identifier-naming.ConstexprVariableCase,     value: camelBack }
+  - { key: readability-identifier-naming.StaticConstantCase,        value: camelBack }
+  - { key: readability-identifier-naming.NamespaceCase,             value: lower_case }
+  - { key: readability-identifier-naming.TemplateParameterCase,     value: CamelCase }
+  - { key: misc-const-correctness.AnalyzeValues,                    value: true }
+  - { key: misc-const-correctness.WarnPointersAsValues,             value: false }
+  - { key: misc-const-correctness.AnalyzePointers,                  value: false } # C APIs (GLFW) take non-const
+  - { key: cppcoreguidelines-special-member-functions.AllowSoleDefaultDtor, value: true }

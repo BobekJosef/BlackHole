@@ -100,7 +100,7 @@ Photon cameraRay(const ThreeVector& position, const Tetrad& tetrad, const ThreeV
     FourVector p {};
     for (std::size_t mu {0}; mu < 4; ++mu) {
         p[mu] = -tetrad.time[mu] + direction[0] * tetrad.right[mu] + direction[1] * tetrad.up[mu]
-              + direction[2] * tetrad.forward[mu];
+            + direction[2] * tetrad.forward[mu];
     }
     const FourVector pLower {lower(metric(position, a), p)};
     return Photon {.position = position, .momentum = {pLower[1], pLower[2], pLower[3]}, .pt = pLower[0]};
@@ -109,6 +109,17 @@ Photon cameraRay(const ThreeVector& position, const Tetrad& tetrad, const ThreeV
 double skyRedshift(const Photon& photon)
 {
     return 1.0 / photon.pt;
+}
+
+ThreeVector cameraPixelDirection(const double pixelX, const double pixelY, const int width, const int height,
+                                 const double tanHalfFov)
+{
+    // screen = (2 pixel - resolution) / height: y in [-1, 1], x scaled by the aspect ratio.
+    const double sx {(2.0 * pixelX - static_cast<double>(width)) / static_cast<double>(height)};
+    const double sy {(2.0 * pixelY - static_cast<double>(height)) / static_cast<double>(height)};
+    const ThreeVector n {sx * tanHalfFov, sy * tanHalfFov, 1.0};
+    const double length {std::sqrt(dot3(n, n))};
+    return {n[0] / length, n[1] / length, n[2] / length};
 }
 
 Photon rungeKuttaStep(const Photon& state, const double a, const double h)
@@ -137,7 +148,22 @@ TraceResult traceRay(Photon photon, const double a, const TraceSettings& setting
             return TraceResult {.fate = RayFate::ESCAPED, .photon = photon, .steps = step};
         }
         const double h {r * std::min(settings.stepScale * std::sqrt(r), settings.maxStepFraction)};
+        const ThreeVector previous {photon.position};
         photon = rungeKuttaStep(photon, a, h);
+
+        const double z {photon.position[2]};
+        if (settings.disk && previous[2] * z < 0.0) {
+            const double t {previous[2] / (previous[2] - z)};
+            const ThreeVector hit {previous[0] + t * (photon.position[0] - previous[0]),
+                                   previous[1] + t * (photon.position[1] - previous[1]), 0.0};
+            const double radius {std::sqrt(std::max(hit[0] * hit[0] + hit[1] * hit[1] - a * a, 0.0))};
+            if (radius >= settings.disk->innerRadius && radius <= settings.disk->outerRadius) {
+                return TraceResult {.fate = RayFate::DISK,
+                                    .photon = photon,
+                                    .steps = step + 1,
+                                    .diskHit = DiskHit {.position = hit, .radius = radius}};
+            }
+        }
     }
     return TraceResult {.fate = RayFate::STEP_LIMIT, .photon = photon, .steps = settings.maxSteps};
 }

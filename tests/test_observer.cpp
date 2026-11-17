@@ -8,6 +8,7 @@
 //  - radial free fall from rest in Schwarzschild follows the cycloid r = r0 (1 + cos eta) / 2,
 //    tau = sqrt(r0^3 / 8) (eta + sin eta); in Kerr it keeps H = -1/2 and L_z = 0 down to the horizon.
 
+#include "Check.hpp"
 #include "physics/Geodesic.hpp"
 #include "physics/Kerr.hpp"
 #include "physics/KerrSchild.hpp"
@@ -15,35 +16,16 @@
 
 #include <array>
 #include <cmath>
-#include <iostream>
 #include <numbers>
 #include <source_location>
 #include <string_view>
 
 namespace {
 
+using bh::test::expect;
+using bh::test::expectNear;
+
 namespace kerr = bh::kerr;
-
-int g_failures {0};
-
-void expect(const bool condition, const std::string_view what,
-            const std::source_location where = std::source_location::current())
-{
-    if (!condition) {
-        ++g_failures;
-        std::cerr << where.file_name() << ':' << where.line() << ": " << what << '\n';
-    }
-}
-
-void expectNear(const double actual, const double expected, const double tolerance, const std::string_view what,
-                const std::source_location where = std::source_location::current())
-{
-    if (!(std::abs(actual - expected) <= tolerance)) { // written so that NaN fails
-        ++g_failures;
-        std::cerr << where.file_name() << ':' << where.line() << ": " << what << ": " << actual << " vs " << expected
-                  << '\n';
-    }
-}
 
 [[nodiscard]] kerr::FourVector combine(const double s, const kerr::FourVector& u, const double t,
                                        const kerr::FourVector& v)
@@ -99,7 +81,12 @@ void testAberration()
     constexpr double a = 0.9;
     const kerr::ThreeVector position {equatorial(6.0, a)};
     const kerr::Metric g {kerr::metric(position, a)};
-    const kerr::FourVector u {kerr::keplerianVelocity(position, a, kerr::Orbit::PROGRADE).value()};
+    const auto keplerian {kerr::keplerianVelocity(position, a, kerr::Orbit::PROGRADE)};
+    expect(keplerian.has_value(), "circular orbit at r = 6");
+    if (!keplerian) {
+        return;
+    }
+    const kerr::FourVector& u {*keplerian};
     const kerr::FourVector zamo {kerr::zamoVelocity(position, a)};
     const double gamma {-kerr::dot(g, u, zamo)};
     const double v {std::sqrt(1.0 - 1.0 / (gamma * gamma))};
@@ -134,9 +121,15 @@ void testDoppler()
 {
     constexpr double r = 50.0;
     const kerr::ThreeVector position {equatorial(r, 0.0)};
-    const kerr::FourVector u {kerr::keplerianVelocity(position, 0.0, kerr::Orbit::PROGRADE).value()};
+    const auto keplerian {kerr::keplerianVelocity(position, 0.0, kerr::Orbit::PROGRADE)};
+    expect(keplerian.has_value(), "circular orbit at r = 50");
+    if (!keplerian) {
+        return;
+    }
+    const kerr::FourVector& u {*keplerian};
     const double v {kerr::speedRelativeToZamo(position, u, 0.0)};
-    const kerr::Tetrad camera {kerr::observerTetrad(position, u, {0.0, 0.0, 1.0}, {1.0, 0.0, 0.0}, {0.0, 1.0, 0.0}, 0.0)};
+    const kerr::Tetrad camera {
+        kerr::observerTetrad(position, u, {0.0, 0.0, 1.0}, {1.0, 0.0, 0.0}, {0.0, 1.0, 0.0}, 0.0)};
     const double gravitational {1.0 / std::sqrt(1.0 - 2.0 / r)};
     const kerr::Photon ahead {kerr::cameraRay(position, camera, {0.0, 0.0, 1.0}, 0.0)};
     const kerr::Photon behind {kerr::cameraRay(position, camera, {0.0, 0.0, -1.0}, 0.0)};
@@ -183,7 +176,12 @@ void testFreeFall()
     // Keplerian observer agree.
     for (const kerr::Orbit orbit : {kerr::Orbit::PROGRADE, kerr::Orbit::RETROGRADE}) {
         const kerr::ThreeVector at {equatorial(9.0, a)};
-        const kerr::FourVector circular {kerr::keplerianVelocity(at, a, orbit).value()};
+        const auto keplerian {kerr::keplerianVelocity(at, a, orbit)};
+        expect(keplerian.has_value(), "circular orbit at r = 9");
+        if (!keplerian) {
+            continue;
+        }
+        const kerr::FourVector& circular {*keplerian};
         const double speed {kerr::speedRelativeToZamo(at, circular, a)};
         const double signedSpeed {orbit == kerr::Orbit::PROGRADE ? speed : -speed};
         const kerr::Photon launched {kerr::launchedFromZamo(at, a, signedSpeed)};
@@ -208,7 +206,8 @@ void testFreeFall()
     // (the app advances a whole frame at once; checking only between frames let the camera fall through
     // the horizon, where these coordinates are singular).
     const double horizon {kerr::outerHorizonRadius(a)};
-    const kerr::ProperTimeStep step {kerr::advanceProperTime(kerr::fallingFromRest(position, a), a, 1.0e4, 1.05 * horizon)};
+    const kerr::ProperTimeStep step {
+        kerr::advanceProperTime(kerr::fallingFromRest(position, a), a, 1.0e4, 1.05 * horizon)};
     const double r {kerr::boyerLindquistRadius(step.state.position, a)};
     expect(r > horizon && r <= 1.05 * horizon, "stops between r+ and the stop radius");
     expect(step.elapsed < 1.0e4, "reports the proper time actually advanced");
@@ -217,17 +216,22 @@ void testFreeFall()
 
 } // namespace
 
-int main()
+TEST_CASE("Keplerian observer is a circular geodesic")
 {
     testKeplerianObserver();
-    testAberration();
-    testDoppler();
-    testFreeFall();
+}
 
-    if (g_failures != 0) {
-        std::cerr << g_failures << " check(s) failed\n";
-        return 1;
-    }
-    std::cout << "all observer checks passed\n";
-    return 0;
+TEST_CASE("aberration between camera and ZAMO")
+{
+    testAberration();
+}
+
+TEST_CASE("Doppler shift of the sky ahead and behind")
+{
+    testDoppler();
+}
+
+TEST_CASE("free fall: cycloid, conservation, sideways launch")
+{
+    testFreeFall();
 }

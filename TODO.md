@@ -251,16 +251,34 @@ not speed.
 Later, only if the frame rate ever needs it: adaptive resolution while the camera moves; early ray
 termination and a tighter `r_escape`; work-group size, register pressure and divergence profiling.
 
-## Stage 7 — Quality and tooling
+## Stage 7 — Quality and tooling ✅
 
-- [ ] **CPU reference tracer** in `bh_physics` (double precision, same equations) that renders a small image;
-      a test compares it pixel by pixel against the GPU output read back with `glGetTexImage`.
-- [ ] Switch the hand-rolled test harness to doctest or Catch2 (FetchContent) when the tests grow.
-- [ ] CI (GitHub Actions): Linux GCC + Clang and Windows MSVC builds with `-Werror`, unit tests, and
-      `glslangValidator` on every shader. No GPU needed for any of these.
-- [ ] `.clang-format` and `.clang-tidy` matching CLAUDE.md; LSan suppressions file for GPU-driver leaks in the
-      `asan` preset.
-- [ ] Bump dependency versions deliberately (GLFW 3.4, GLM 1.0.1, ImGui 1.91.9b are pinned now).
+- [x] **CPU reference vs GPU** (`blackhole --validate`, `app/Validation.cpp`): `kerr::traceRay` now runs the
+      shader's whole algorithm in double (same step rule, capture/escape radii, thin-disk crossing on the
+      chord, pixel mapping `kerr::cameraPixelDirection`); `trace.comp` can write per pixel (fate, escape
+      direction or disk hit) to an rgba32f image. Three fixed scenes (Kerr edge-on, Kerr face-on,
+      Schwarzschild close) at 160 × 90, compared pixel by pixel in a hidden window, 0.5 s. Measured: fate
+      agreement 100 %, median direction difference 1e-7 rad, median disk radius difference 1e-7
+      (relative); limits 99.5 %, 1e-4 rad, 1e-5. A mutation (dropping a² from the disk radius in the shader)
+      fails both Kerr scenes. CTest `gpu_reference` with `-DBLACKHOLE_GPU_TESTS=ON` (needs a GPU, so not
+      in CI).
+- [x] **doctest 2.5.3** instead of the hand-rolled harness: `tests/Check.hpp` (`expect`, `expectNear`,
+      `expectRelative`, reporting the caller's line and the values), each `TEST_CASE` registered with
+      CTest (26 cases, `<suite>/<case>`).
+- [x] **CI** (`.github/workflows/ci.yml`): Linux GCC 13 (`debug`, `-Werror`, unit tests, glslang), Linux
+      Clang 21 with ASan + UBSan, lint (clang-format + clang-tidy 21), Windows MSVC `/W4 /WX`. Not yet run
+      on GitHub (written and checked locally only).
+- [x] **`.clang-format` / `.clang-tidy`** matching CLAUDE.md, applied (formatting changed ~250 lines);
+      `scripts/lint.sh [--fix]` runs both, clang-tidy in parallel (20 s). The first tidy run's findings were
+      fixed (missing const, an int multiplication widened to size_t, a discarded future result, unchecked
+      optionals in tests, an exception escaping a test's main) or configured away where they contradict
+      the conventions (member `{}` initialisers, enum sizes, constants' case).
+- [x] **LSan suppressions** (`scripts/lsan.supp`, used by the `asan` test preset): one driver leak (128
+      bytes in Mesa's GLX extension query, reached from `_glfwInitGLX`). The app now exits cleanly on
+      SIGINT/SIGTERM, so interactive sanitizer runs report too (exit 0, nothing else leaks).
+- [x] **Dependencies bumped**: GLFW 3.4 → 3.5.1, GLM 1.0.1 → 1.0.3, Dear ImGui 1.91.9b → 1.93.0 (fonts
+      are rasterised at the drawn size since 1.92, so UI scaling is `style.FontScaleDpi`, no atlas rebuild;
+      `AddPolyline` takes thickness before flags since 1.92.8). doctest 2.5.3 added. All ≥ 4 weeks old.
 
 ---
 

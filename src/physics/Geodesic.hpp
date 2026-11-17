@@ -11,6 +11,8 @@
 
 #include "physics/KerrSchild.hpp"
 
+#include <optional>
+
 namespace bh::kerr {
 
 // Spatial position and covariant spatial momentum p_i; p_t is constant along the ray. Also the state of a
@@ -55,7 +57,18 @@ struct PhotonDerivative {
 // (H = 0) or timelike (H = -1/2, h in proper time).
 [[nodiscard]] Photon rungeKuttaStep(const Photon& state, double a, double h);
 
-enum class RayFate { CAPTURED, ESCAPED, STEP_LIMIT };
+// Unit direction, in the camera frame (x right, y up, z forward), of the ray through the point `pixel` of a
+// width x height image (pixel centres at i + 0.5) with vertical field of view 2 atan(tanHalfFov). The
+// renderer's mapping: trace.comp, pixelDirection.
+[[nodiscard]] ThreeVector cameraPixelDirection(double pixelX, double pixelY, int width, int height, double tanHalfFov);
+
+enum class RayFate { CAPTURED, ESCAPED, DISK, STEP_LIMIT };
+
+// A geometrically thin, opaque disk in the equatorial plane between two Boyer-Lindquist radii.
+struct DiskExtent {
+    double innerRadius {};
+    double outerRadius {};
+};
 
 struct TraceSettings {
     // Affine step h = r min(stepScale sqrt(r), maxStepFraction): fine near the hole, growing with r^1.5
@@ -65,15 +78,25 @@ struct TraceSettings {
     int maxSteps {200000};
     double escapeRadius {1.0e4};  // Boyer-Lindquist r beyond which the ray counts as escaped
     double horizonMargin {1.01};  // captured once r < horizonMargin * r+
+    std::optional<DiskExtent> disk {};
+};
+
+struct DiskHit {
+    ThreeVector position {}; // Kerr-Schild, on z = 0
+    double radius {};        // Boyer-Lindquist, sqrt(x^2 + y^2 - a^2)
 };
 
 struct [[nodiscard]] TraceResult {
     RayFate fate {RayFate::STEP_LIMIT};
     Photon photon {};
     int steps {};
+    std::optional<DiskHit> diskHit {}; // when fate is DISK
 };
 
-// Classical fourth-order Runge-Kutta with the step above.
+// Classical fourth-order Runge-Kutta with the step above. A crossing of z = 0 (a strict sign change between
+// two steps) is located on the chord between them; within the disk's extent it ends the ray. This is the
+// algorithm of trace.comp in double precision: the CPU reference the renderer is validated against
+// (blackhole --validate).
 TraceResult traceRay(Photon photon, double a, const TraceSettings& settings);
 
 } // namespace bh::kerr

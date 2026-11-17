@@ -57,8 +57,9 @@ struct EnumName {
 
 [[nodiscard]] constexpr auto enumNames(Background)
 {
-    return std::array {EnumName<Background> {Background::NONE, "none"}, EnumName<Background> {Background::STARS, "stars"},
-                       EnumName<Background> {Background::GRID, "grid"}, EnumName<Background> {Background::IMAGE, "image"}};
+    return std::array {
+        EnumName<Background> {Background::NONE, "none"}, EnumName<Background> {Background::STARS, "stars"},
+        EnumName<Background> {Background::GRID, "grid"}, EnumName<Background> {Background::IMAGE, "image"}};
 }
 
 [[nodiscard]] constexpr auto enumNames(Observer)
@@ -264,7 +265,8 @@ std::expected<ParsedPreset, std::string> parsePreset(const std::string_view text
             known = true;
             const auto parsed {parseValue(valueText, value)};
             if (!parsed) {
-                error = std::format("line {}: {} must be {}, not '{}'", lineNumber, key, expectedForm(value), valueText);
+                error =
+                    std::format("line {}: {} must be {}, not '{}'", lineNumber, key, expectedForm(value), valueText);
                 return;
             }
             if (!inRange(*parsed, range)) {
