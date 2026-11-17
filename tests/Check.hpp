@@ -6,6 +6,7 @@
 
 #include <cmath>
 #include <format>
+#include <ostream> // doctest streams the messages; with MSVC it only forward-declares std::ostream
 #include <source_location>
 #include <string_view>
 
