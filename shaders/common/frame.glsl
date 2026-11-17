@@ -4,19 +4,34 @@
 // Per-frame data shared by the passes. The layout must match src/render/FrameUniforms.hpp,
 // whose static_asserts pin the std140 offsets.
 layout(std140, binding = 0) uniform Frame {
-    mat4  uCameraBasis;      // columns: right, up, forward (xyz)
-    vec4  uCameraPosition;   // xyz in units of M
+    // Camera frame (ZAMO tetrad) as covariant 4-vectors (t, x, y, z) in Kerr-Schild coordinates:
+    // columns u_mu, right_mu, up_mu, forward_mu. A pixel looking along unit n (right, up, forward)
+    // starts the backward ray p_mu = uCameraFrame * vec4(-1, n).
+    mat4  uCameraFrame;
+    vec4  uCameraPosition;   // xyz, Kerr-Schild, units of M
     vec2  uResolution;       // trace resolution in pixels
     float uTanHalfFov;       // tan(vertical FOV / 2)
     float uTime;             // seconds
-    float uShadowRadius;     // Stage 0 placeholder shadow sphere
+    float uSpin;             // a = J/M
+    float uCaptureRadius;    // Boyer-Lindquist r below which a ray counts as captured (just outside r+)
     float uDiskInnerRadius;  // ISCO
     float uDiskOuterRadius;
+    float uStepScale;        // affine step h = r min(uStepScale sqrt(r), uMaxStepFraction)
+    float uMaxStepFraction;
+    float uEscapeRadius;     // Boyer-Lindquist r beyond which a ray samples the sky
+    uint  uMaxSteps;
     uint  uFlags;            // FLAG_* bits
+    uint  uDebugView;        // DEBUG_VIEW_*
 };
 
 const uint FLAG_DISK  = 1u << 0;
 const uint FLAG_STARS = 1u << 1;
+
+// Must match bh::DebugView in src/render/FrameParams.hpp.
+const uint DEBUG_VIEW_NONE = 0u;
+const uint DEBUG_VIEW_STEPS = 1u;
+const uint DEBUG_VIEW_CONSTRAINT = 2u;
+const uint DEBUG_VIEW_FATE = 3u;
 
 bool hasFlag(uint flag)
 {

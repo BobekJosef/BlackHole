@@ -2,14 +2,18 @@
 
 #include "blackhole/config.hpp"
 #include "physics/Kerr.hpp"
+#include "physics/KerrSchild.hpp"
 #include "render/GpuPass.hpp"
 #include "ui/ControlPanel.hpp"
+#include "ui/ShadowOverlay.hpp"
 
 #include <glad/gl.h>
 #include <GLFW/glfw3.h>
 
+#include <algorithm>
 #include <cmath>
 #include <filesystem>
+#include <array>
 #include <format>
 
 namespace bh {
@@ -19,6 +23,39 @@ namespace {
 // Weight of the newest frame in the exponential moving average of the frame time.
 constexpr double frameTimeSmoothing = 0.05;
 constexpr double shaderPollSeconds = 1.0;
+// Rays count as captured just outside the horizon (the backward integration slows down there).
+constexpr double captureMargin = 1.01;
+// Sky lookup radius. In outgoing Kerr-Schild coordinates a ray's coordinate direction is within
+// ~1e-5 rad of its asymptotic one by r = 200 (tests/test_geodesic.cpp, testEscapeDirection); the
+// camera-distance term keeps that true for rays with impact parameters up to the camera distance.
+constexpr double minEscapeRadius = 200.0;
+constexpr double escapeRadiusPerCameraDistance = 4.0;
+constexpr std::size_t shadowOutlineSamples = 512;
+
+[[nodiscard]] kerr::ThreeVector toDouble(const glm::vec3& v)
+{
+    return {static_cast<double>(v.x), static_cast<double>(v.y), static_cast<double>(v.z)};
+}
+
+// The ZAMO tetrad at the camera, lowered with the metric and packed as the columns
+// (u_mu, right_mu, up_mu, forward_mu) of the shader's uCameraFrame.
+[[nodiscard]] glm::mat4 cameraFrame(const glm::vec3& position, const glm::mat3& basis, const double a)
+{
+    const kerr::ThreeVector x {toDouble(position)};
+    const kerr::Tetrad tetrad {
+        kerr::zamoTetrad(x, toDouble(basis[0]), toDouble(basis[1]), toDouble(basis[2]), a)};
+    const kerr::Metric g {kerr::metric(x, a)};
+    glm::mat4 frame {};
+    const std::array columns {tetrad.time, tetrad.right, tetrad.up, tetrad.forward};
+    for (std::size_t column {0}; column < columns.size(); ++column) {
+        const kerr::FourVector lowered {kerr::lower(g, columns[column])};
+        for (std::size_t row {0}; row < 4; ++row) {
+            frame[static_cast<glm::length_t>(column)][static_cast<glm::length_t>(row)] =
+                static_cast<float>(lowered[row]);
+        }
+    }
+    return frame;
+}
 
 [[nodiscard]] std::string glString(const GLenum name)
 {
@@ -78,6 +115,7 @@ void Application::run()
             m_window.setVsync(m_vsync);
         }
         m_camera.setVerticalFovDegrees(m_settings.fovDegrees);
+        drawOverlays();
 
         m_gpuTimer.beginFrame();
         m_renderer.draw(frameParams(framebuffer, static_cast<float>(now)), m_gpuTimer);
@@ -117,23 +155,46 @@ void Application::handleInput()
 FrameParams Application::frameParams(const glm::ivec2 framebufferSize, const float time) const
 {
     const double a {static_cast<double>(m_settings.spin)};
+    const glm::vec3 position {m_camera.position()};
     return FrameParams {
         .outputSize = framebufferSize,
         .renderScale = m_settings.renderScale,
-        .cameraPosition = m_camera.position(),
-        .cameraBasis = m_camera.basis(),
+        .cameraPosition = position,
+        .cameraFrame = cameraFrame(position, m_camera.basis(), a),
         .tanHalfFov = std::tan(glm::radians(m_camera.verticalFovDegrees()) / 2.0F),
-        .shadowRadius = static_cast<float>(kerr::schwarzschildCriticalImpactParameter),
+        .spin = m_settings.spin,
+        .captureRadius = static_cast<float>(captureMargin * kerr::outerHorizonRadius(a)),
         .diskEnabled = m_settings.diskEnabled,
         .diskInnerRadius = static_cast<float>(kerr::iscoRadius(a, m_settings.diskOrbit)),
         .diskOuterRadius = m_settings.diskOuterRadius,
         .starsEnabled = m_settings.starsEnabled,
         .time = time,
+        .stepScale = m_settings.stepScale,
+        .maxStepFraction = m_settings.maxStepFraction,
+        .escapeRadius = static_cast<float>(
+            std::max(minEscapeRadius, escapeRadiusPerCameraDistance * static_cast<double>(m_camera.distance()))),
+        .maxSteps = m_settings.maxSteps,
+        .debugView = m_settings.debugView,
         .exposure = std::exp2(m_settings.exposureEv),
         .toneMapper = m_settings.toneMapper,
         .bloomEnabled = m_settings.bloomEnabled,
         .bloomStrength = m_settings.bloomStrength,
     };
+}
+
+void Application::drawOverlays() const
+{
+    if (!m_settings.shadowOutline) {
+        return;
+    }
+    const double a {static_cast<double>(m_settings.spin)};
+    const kerr::ThreeVector position {toDouble(m_camera.position())};
+    const double cameraRadius {kerr::boyerLindquistRadius(position, a)};
+    // Boyer-Lindquist inclination: z = r cos(theta) holds exactly in Kerr-Schild coordinates.
+    const double inclination {std::acos(std::clamp(position[2] / cameraRadius, -1.0, 1.0))};
+    const auto outline {kerr::shadowOutline(a, inclination, shadowOutlineSamples)};
+    const double tanHalfFov {std::tan(static_cast<double>(glm::radians(m_camera.verticalFovDegrees())) / 2.0)};
+    drawShadowOutline(outline, cameraRadius, tanHalfFov);
 }
 
 void Application::reloadShaders()

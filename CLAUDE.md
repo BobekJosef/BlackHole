@@ -6,9 +6,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 BlackHole is an interactive, physically based renderer of a rotating (Kerr) black hole with an optional
 accretion disk and a configurable background. The rendering runs on the GPU (OpenGL 4.3 core, GLSL);
-the C++ side owns the window, input, UI and the closed-form physics. `TODO.md` is the roadmap; Stages 0–1
-are done. The physics in `trace.comp` is still the flat-space placeholder: rays are straight lines, there is
-no lensing yet (Stage 2).
+the C++ side owns the window, input, UI and the closed-form physics. `TODO.md` is the roadmap; Stages 0–3
+are done: rays follow Kerr null geodesics (`trace.comp` + `common/kerr.glsl`), the disk is a thin opaque
+annulus from the ISCO, but its colour is still a placeholder without Doppler or redshift (Stage 4).
 
 A frame is three GPU passes (`BlackHoleRenderer`): **trace** (compute, one ray per pixel at
 `renderScale` × window size → HDR radiance image) → **bloom** (compute down/up-sampling chain) →
@@ -30,8 +30,9 @@ cmake --preset asan    && cmake --build --preset asan -j      # ASan + UBSan
 ```
 
 Run commands from the repository root. Always pass `-j`: the default generator is Make, which builds
-serially otherwise. Running the app opens a window on the user's display; keep such runs short and kill
-the process when done.
+serially otherwise. Running the app opens a window on the user's display: keep such runs short, start the
+binary itself in the background (`binary > log 2>&1 & pid=$!` — never `cd dir && binary &`, whose `$!` is
+a wrapper shell, so `kill` leaves the window open), kill it, and confirm with `pgrep -x blackhole`.
 
 - Dependencies come from `cmake/Dependencies.cmake`: GLFW and GLM through `find_package` when an installed
   package (system or vcpkg) matches, otherwise FetchContent; ImGui always through FetchContent; GLAD is
@@ -51,7 +52,9 @@ the process when done.
 ## Layout
 
 ```
-src/physics/   closed-form Kerr formulas (bh_physics library; no OpenGL, unit-tested)
+src/physics/   bh_physics (no OpenGL, no GLM, double precision, unit-tested):
+               Kerr (closed forms, shadow outline), KerrSchild (metric, ZAMO tetrad),
+               Geodesic (Hamiltonian equations, RK4 tracer: the CPU reference for the shaders)
 src/gfx/       thin OpenGL/GLFW wrappers: Window, GlObject (RAII names), ShaderProgram, GlDebug, GpuTimer;
                ShaderPreprocessor (GLSL #include; no GL, so its own bh_shadertools library, unit-tested)
 src/render/    BlackHoleRenderer (the passes), FrameParams (CPU-side frame description),
@@ -60,7 +63,7 @@ src/scene/     OrbitCamera, SceneSettings (what the UI edits)
 src/ui/        ImGuiLayer (context + backends), ControlPanel
 src/app/       Application: owns everything, runs the frame loop
 shaders/       main shaders: trace.comp, bloom_*.comp, fullscreen.vert + present.frag
-shaders/common/ shared GLSL headers: frame (UBO), color (tone mapping, sRGB), sky, disk, random
+shaders/common/ shared GLSL headers: frame (UBO), kerr (geodesics), color (tone mapping, sRGB), sky, disk, random
 tests/         CTest executables (bh_physics, bh_shadertools; no GL context in tests) + GLSL validation
 external/glad/ vendored loader
 ```
@@ -75,9 +78,17 @@ is converted to GPU quantities in one place (`Application::frameParams`).
   use them; label UI values with "M".
 - Metric signature `(-, +, +, +)`. Spin `a = J/M` with `0 ≤ a ≤ 1` (the UI stops at Thorne's 0.998); the
   sense of the disk is the separate `kerr::Orbit`, not a negative `a`.
-- World frame: spin axis `+z`, equatorial plane `z = 0`. Boyer–Lindquist `(t, r, θ, φ)` for formulas and
-  readouts; Kerr–Schild Cartesian coordinates for the geodesic integrator (regular at the horizon and on
-  the axis).
+- World frame: spin axis `+z`, equatorial plane `z = 0`, the hole rotates counterclockwise seen from `+z`.
+  Boyer–Lindquist `(t, r, θ, φ)` for formulas and readouts; **outgoing** Kerr–Schild Cartesian coordinates
+  for everything traced (camera position, rays, disk hits). In them `z = r cos θ` exactly, and on the
+  equator `r = √(x² + y² − a²)`. Outgoing because rays run backwards in time and captured ones approach
+  the past horizon, where the ingoing form is singular (see `KerrSchild.hpp`).
+- Camera rays are **past-directed**: `p = −u + n` for a pixel looking along `n` in the ZAMO frame `u`.
+  Never `u + n`: that is only equivalent in static spacetimes and mirrors the spin in Kerr.
+- The GLSL physics is a float copy of `src/physics/Geodesic.cpp`. Change the C++ first, prove it with a
+  test in `tests/test_geodesic.cpp`, then port; keep the two algebraically identical (the GLSL may
+  regroup terms for speed, e.g. reciprocals). Check the result in the app with the *Constraint* debug
+  view and the *Analytic shadow edge* overlay.
 - Every formula cites its source next to it (paper and equation number). Prefer a closed form with a test
   against the known limits (`a = 0`, `a = 1`, prograde vs retrograde) over a fitted number.
 - Anything not physical (artistic exposure, fitted colours, procedural stars) is marked as such in a comment,

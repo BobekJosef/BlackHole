@@ -4,24 +4,29 @@ Interactive, GPU-accelerated simulation of a rotating (Kerr) black hole, written
 The goal is a physically based image — light bent along null geodesics of the Kerr metric, a thin
 accretion disk with relativistic Doppler and gravitational redshift — that you can fly around in real time.
 
-> **Status: Stage 1 done.** The GPU pipeline (compute tracing, bloom, tone mapping, timing), camera,
-> control panel and closed-form Kerr physics work; the image is still a flat-space preview (no lensing).
-> See [TODO.md](TODO.md) for the roadmap.
+> **Status: Stage 3 done.** Light follows null geodesics of the Kerr metric, traced on the GPU; the
+> shadow matches the analytic (Bardeen 1973) outline. The accretion disk's colour is still a placeholder:
+> relativistic Doppler and gravitational redshift come next (Stage 4). See [TODO.md](TODO.md).
 
 ## Features
 
-- Runs on the GPU: a compute shader traces one ray per pixel into an HDR image, followed by bloom and
-  tone mapping (AgX or ACES) passes
+- General-relativistic ray tracing on the GPU: one null geodesic of the Kerr metric per pixel (RK4 in
+  Kerr–Schild coordinates), seen by a zero-angular-momentum observer: lensed disk, D-shaped shadow,
+  photon rings, lensed stars
+- Thin accretion disk from the innermost stable circular orbit (ISCO) outwards
+- Validation tools: debug views (step count, integration error, ray fate) and an overlay of the analytic
+  shadow edge
+- HDR pipeline: bloom and tone mapping (AgX or ACES)
 - Orbit camera (drag to rotate, scroll to zoom), adjustable field of view, exposure in EV
 - Dear ImGui panel: spin `a/M`, prograde/retrograde disk, disk on/off and size, star background on/off,
-  render scale (25–100 % of the window resolution), tone mapper, bloom
+  integrator step size and step limit, render scale (25–100 % of the window resolution), tone mapper, bloom
 - Live readouts of the horizon, ergosphere, photon orbit and ISCO radii for the chosen spin
 - GPU time per pass (trace, bloom, present, UI) in the panel
 - Shader hot reload: edit anything in `shaders/` while the app runs; it recompiles on save, and errors
   show up in the panel with file and line
 
-Planned: Kerr geodesic ray tracing, Novikov–Thorne disk with Doppler beaming and redshift, HDR image and
-cubemap backgrounds, adaptive resolution. Details in [TODO.md](TODO.md).
+Planned: Novikov–Thorne disk with Doppler beaming and redshift, HDR image and cubemap backgrounds,
+adaptive resolution, moving cameras. Details in [TODO.md](TODO.md).
 
 ## Requirements
 
@@ -104,7 +109,7 @@ Troubleshooting:
 ## Project layout
 
 ```
-src/physics/   closed-form Kerr formulas (no OpenGL; unit-tested)
+src/physics/   Kerr physics in double precision: closed forms, metric, geodesics (unit-tested)
 src/gfx/       window, OpenGL object wrappers, shader programs
 src/render/    the black hole renderer
 src/scene/     camera and user settings

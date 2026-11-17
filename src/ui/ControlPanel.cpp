@@ -12,6 +12,22 @@ namespace bh {
 namespace {
 
 constexpr std::array<const char*, 4> toneMapperNames {"AgX", "ACES (Hill fit)", "Exponential", "Clamp (none)"};
+constexpr std::array<const char*, 4> debugViewNames {"None", "Step count", "Constraint |H| / p^2",
+                                                     "Fate (captured/sky/disk/limit)"};
+
+void drawRayTracingSettings(SceneSettings& settings)
+{
+    ImGui::SliderFloat("Step scale", &settings.stepScale, 0.005F, 0.1F, "%.3f", ImGuiSliderFlags_Logarithmic);
+    ImGui::SetItemTooltip("Affine step near the hole: h = scale * r^1.5. Smaller is more accurate and slower.");
+    ImGui::SliderFloat("Far step limit", &settings.maxStepFraction, 0.05F, 0.5F, "%.2f r");
+    ImGui::SliderInt("Max steps", &settings.maxSteps, 50, 4000, "%d", ImGuiSliderFlags_Logarithmic);
+    int debugView {std::to_underlying(settings.debugView)};
+    if (ImGui::Combo("Debug view", &debugView, debugViewNames.data(), static_cast<int>(debugViewNames.size()))) {
+        settings.debugView = static_cast<DebugView>(debugView);
+    }
+    ImGui::Checkbox("Analytic shadow edge", &settings.shadowOutline);
+    ImGui::SetItemTooltip("Bardeen (1973) critical curve; exact for distant observers.");
+}
 
 void drawPhysicsReadout(const SceneSettings& settings)
 {
@@ -68,7 +84,7 @@ PanelActions drawControlPanel(SceneSettings& settings, const PanelInfo& info)
         return actions;
     }
 
-    ImGui::TextDisabled("Flat-space preview, no lensing yet");
+    ImGui::TextDisabled("Kerr geodesics; disk colour is a placeholder");
     if (!info.shaderError.empty()) { // on top, so it cannot scroll out of sight
         ImGui::PushStyleColor(ImGuiCol_Text, ImVec4 {1.0F, 0.4F, 0.4F, 1.0F});
         ImGui::TextWrapped("Shader error (previous shaders still active):\n%.*s",
@@ -97,6 +113,10 @@ PanelActions drawControlPanel(SceneSettings& settings, const PanelInfo& info)
     if (ImGui::CollapsingHeader("Camera", ImGuiTreeNodeFlags_DefaultOpen)) {
         ImGui::SliderFloat("Vertical FOV", &settings.fovDegrees, 10.0F, 140.0F, "%.0f deg");
         ImGui::Text("Distance %.2f M", info.cameraDistance);
+    }
+
+    if (ImGui::CollapsingHeader("Ray tracing", ImGuiTreeNodeFlags_DefaultOpen)) {
+        drawRayTracingSettings(settings);
     }
 
     if (ImGui::CollapsingHeader("Image", ImGuiTreeNodeFlags_DefaultOpen)) {

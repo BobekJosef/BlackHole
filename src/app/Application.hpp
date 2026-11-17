@@ -22,6 +22,7 @@ public:
 private:
     void handleInput();
     [[nodiscard]] FrameParams frameParams(glm::ivec2 framebufferSize, float time) const;
+    void drawOverlays() const;
     void reloadShaders();
     void pollShaderFiles(double now);
 

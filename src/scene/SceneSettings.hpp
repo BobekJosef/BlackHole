@@ -21,8 +21,15 @@ struct SceneSettings {
     // Camera
     float fovDegrees {60.0F};
 
+    // Ray tracing
+    float stepScale {0.02F};        // near-hole step h = stepScale r^1.5
+    float maxStepFraction {0.25F};  // far-field step limit h <= maxStepFraction r
+    int maxSteps {600};
+    DebugView debugView {DebugView::NONE};
+    bool shadowOutline {false};     // overlay of the analytic edge (Bardeen 1973)
+
     // Image
-    float renderScale {1.0F}; // trace resolution / window resolution
+    float renderScale {0.75F}; // trace resolution / window resolution; the tracer is compute-bound
     ToneMapper toneMapper {ToneMapper::AGX};
     float exposureEv {0.0F}; // exposure = 2^EV
     bool bloomEnabled {true};

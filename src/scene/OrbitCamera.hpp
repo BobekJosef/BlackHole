@@ -15,7 +15,6 @@ public:
     void zoom(double steps);
 
     [[nodiscard]] float distance() const { return m_distance; }
-    [[nodiscard]] float polarAngle() const { return m_polar; }
     [[nodiscard]] float verticalFovDegrees() const { return m_fovDegrees; }
     void setVerticalFovDegrees(float degrees);
 

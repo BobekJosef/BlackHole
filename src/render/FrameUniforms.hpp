@@ -15,26 +15,38 @@ inline constexpr std::uint32_t frameFlagStars = 1U << 1U; // FLAG_STARS
 inline constexpr unsigned frameUniformBinding = 0;
 
 struct FrameUniforms {
-    glm::mat4 cameraBasis {1.0F};  // columns right, up, forward; mat4 because std140 pads mat3 columns
-    glm::vec4 cameraPosition {};   // xyz; w unused
-    glm::vec2 resolution {};       // trace resolution in pixels
+    glm::mat4 cameraFrame {1.0F}; // covariant ZAMO tetrad: columns u, right, up, forward
+    glm::vec4 cameraPosition {};  // xyz; w unused
+    glm::vec2 resolution {};      // trace resolution in pixels
     float tanHalfFov {};
     float time {};
-    float shadowRadius {};
+    float spin {};
+    float captureRadius {};
     float diskInnerRadius {};
     float diskOuterRadius {};
+    float stepScale {};
+    float maxStepFraction {};
+    float escapeRadius {};
+    std::uint32_t maxSteps {};
     std::uint32_t flags {};
+    std::uint32_t debugView {};
 };
 
-static_assert(offsetof(FrameUniforms, cameraBasis) == 0);
+static_assert(offsetof(FrameUniforms, cameraFrame) == 0);
 static_assert(offsetof(FrameUniforms, cameraPosition) == 64);
 static_assert(offsetof(FrameUniforms, resolution) == 80);
 static_assert(offsetof(FrameUniforms, tanHalfFov) == 88);
 static_assert(offsetof(FrameUniforms, time) == 92);
-static_assert(offsetof(FrameUniforms, shadowRadius) == 96);
-static_assert(offsetof(FrameUniforms, diskInnerRadius) == 100);
-static_assert(offsetof(FrameUniforms, diskOuterRadius) == 104);
-static_assert(offsetof(FrameUniforms, flags) == 108);
-static_assert(sizeof(FrameUniforms) == 112);
+static_assert(offsetof(FrameUniforms, spin) == 96);
+static_assert(offsetof(FrameUniforms, captureRadius) == 100);
+static_assert(offsetof(FrameUniforms, diskInnerRadius) == 104);
+static_assert(offsetof(FrameUniforms, diskOuterRadius) == 108);
+static_assert(offsetof(FrameUniforms, stepScale) == 112);
+static_assert(offsetof(FrameUniforms, maxStepFraction) == 116);
+static_assert(offsetof(FrameUniforms, escapeRadius) == 120);
+static_assert(offsetof(FrameUniforms, maxSteps) == 124);
+static_assert(offsetof(FrameUniforms, flags) == 128);
+static_assert(offsetof(FrameUniforms, debugView) == 132);
+static_assert(sizeof(FrameUniforms) == 136);
 
 } // namespace bh

@@ -4,6 +4,7 @@
 #include "render/GpuPass.hpp"
 
 #include <algorithm>
+#include <cstdint>
 #include <initializer_list>
 #include <span>
 #include <stdexcept>
@@ -145,15 +146,21 @@ void BlackHoleRenderer::resizeTargets(const glm::ivec2 traceSize)
 void BlackHoleRenderer::uploadFrameUniforms(const FrameParams& frame)
 {
     const FrameUniforms uniforms {
-        .cameraBasis = glm::mat4 {frame.cameraBasis},
+        .cameraFrame = frame.cameraFrame,
         .cameraPosition = glm::vec4 {frame.cameraPosition, 1.0F},
         .resolution = glm::vec2 {m_radiance.size},
         .tanHalfFov = frame.tanHalfFov,
         .time = frame.time,
-        .shadowRadius = frame.shadowRadius,
+        .spin = frame.spin,
+        .captureRadius = frame.captureRadius,
         .diskInnerRadius = frame.diskInnerRadius,
         .diskOuterRadius = frame.diskOuterRadius,
+        .stepScale = frame.stepScale,
+        .maxStepFraction = frame.maxStepFraction,
+        .escapeRadius = frame.escapeRadius,
+        .maxSteps = static_cast<std::uint32_t>(std::max(frame.maxSteps, 1)),
         .flags = (frame.diskEnabled ? frameFlagDisk : 0U) | (frame.starsEnabled ? frameFlagStars : 0U),
+        .debugView = static_cast<std::uint32_t>(std::to_underlying(frame.debugView)),
     };
     glBindBuffer(GL_UNIFORM_BUFFER, m_frameUniforms.get());
     glBufferSubData(GL_UNIFORM_BUFFER, 0, sizeof(uniforms), &uniforms);
@@ -193,11 +200,13 @@ void BlackHoleRenderer::bloom()
 
 void BlackHoleRenderer::present(const FrameParams& frame)
 {
-    const bool bloomEnabled {frame.bloomEnabled && !m_bloomLevels.empty()};
+    // Debug views show their false colours as they are: no bloom, exposure or tone curve.
+    const bool debug {frame.debugView != DebugView::NONE};
+    const bool bloomEnabled {frame.bloomEnabled && !debug && !m_bloomLevels.empty()};
     gl::ShaderProgram& program {m_programs.present};
     program.set("uOutputSize", glm::vec2 {frame.outputSize});
-    program.set("uExposure", frame.exposure);
-    program.set("uToneMapper", std::to_underlying(frame.toneMapper));
+    program.set("uExposure", debug ? 1.0F : frame.exposure);
+    program.set("uToneMapper", std::to_underlying(debug ? ToneMapper::CLAMP : frame.toneMapper));
     program.set("uBloomEnabled", bloomEnabled);
     program.set("uBloomStrength", frame.bloomStrength);
     program.set("uBloomNormalization", bloomEnabled ? 1.0F / static_cast<float>(m_bloomLevels.size()) : 1.0F);
@@ -223,7 +232,7 @@ void BlackHoleRenderer::draw(const FrameParams& frame, gl::GpuTimer& timer)
 
     trace();
     timer.endSection(index(GpuPass::TRACE));
-    if (frame.bloomEnabled && !m_bloomLevels.empty()) {
+    if (frame.bloomEnabled && frame.debugView == DebugView::NONE && !m_bloomLevels.empty()) {
         bloom();
     }
     timer.endSection(index(GpuPass::BLOOM));

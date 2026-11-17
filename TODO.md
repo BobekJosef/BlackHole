@@ -46,59 +46,60 @@ Follow-ups, when they matter:
       brightness ratios; switch the radiance target alone back to `rgba16f` if banding appears.
 - [ ] A `--benchmark` mode: fixed camera path, VSync off, timings written to stdout (for comparing changes).
 
-## Stage 2 — Schwarzschild lensing (`a = 0`)
+## Stage 2 — Schwarzschild lensing (`a = 0`) ✅
 
-A simpler problem with known answers, to validate the integrator, the camera and the termination logic
-before adding spin.
+Done as the `a = 0` case of the Stage 3 integrator; every Schwarzschild check is a unit test in double
+precision (`tests/test_geodesic.cpp`, against `bh_physics`):
 
-- [ ] Integrate null geodesics in 3D (Cartesian Schwarzschild in Kerr–Schild form, so Stage 3 only swaps
-      the metric). Alternative for a first light: each ray stays in its own plane, where `u = 1/r` obeys
-      `d²u/dφ² = 3u² − u` (Binet) — a 1D ODE in the ray's plane.
-- [ ] Termination: captured at `r < r+ (1 + ε)`, escaped at `r > r_escape` (≥ camera distance, ~1000 M)
-      with the final direction looking up the sky, step limit as a safety net (shown as magenta in debug).
-- [ ] Integrator: RK4 with a step `h ∝ r` (coarse far away, fine near the hole), then compare with an
-      adaptive RK45 (Dormand–Prince / Cash–Karp) on quality vs. cost.
-- [ ] Validation:
-  - the shadow's angular radius seen from `r_obs` equals `arcsin(3√3 √(1 − 2/r_obs) / r_obs)`;
-  - weak-field deflection `→ 4/b` for large impact parameter `b`;
-  - an Einstein ring when a bright point is placed exactly behind the hole.
-- [ ] Debug views: step-count heat map, termination reason, deflection angle.
+- [x] Weak-field deflection `4/b + 15π/(4b²)` (b = 100, to 1e-4).
+- [x] Capture threshold `b = 3√3` (±0.2 %), for rays from infinity.
+- [x] Shadow seen from a finite distance: a camera ray at `sin ψ = 3√3 √(1 − 2/r)/r` sits on the edge
+      (±0.3 %, camera at r = 20).
+- [x] Termination: captured below `1.01 r+`, escaped beyond `max(200, 4 × camera distance)`, step limit
+      as a safety net (magenta in the debug views).
+- [x] Debug views: step count, constraint error `|H|/|p|²`, fate (captured / sky / disk / step limit).
+- [ ] Einstein ring check with a bright point exactly behind the hole (needs Stage 5 image backgrounds).
 
-## Stage 3 — Kerr geodesics (`0 ≤ a < 1`)
+## Stage 3 — Kerr geodesics (`0 ≤ a < 1`) ✅
 
-- [ ] **Equations of motion.** Hamiltonian form `H = ½ g^{μν} p_μ p_ν = 0`,
-      `dx^μ/dλ = ∂H/∂p_μ`, `dp_μ/dλ = −∂H/∂x^μ`, in **Kerr–Schild Cartesian** coordinates
-      `g_{μν} = η_{μν} + f l_μ l_ν` with `f = 2r³/(r⁴ + a²z²)` and
-      `l = (1, (rx + ay)/(r² + a²), (ry − ax)/(r² + a²), z/r)`, where `r` solves
-      `r⁴ − (x² + y² + z² − a²) r² − a² z² = 0`. The inverse metric is `η^{μν} − f l^μ l^ν`, so no matrix
-      inversion is needed. Regular at the horizon and on the axis — unlike Boyer–Lindquist, whose
-      `θ = 0, π` and `r = r+` singularities produce seams and stalls. (GRay, Chan et al. 2013, uses this
-      approach on the GPU.)
-- [ ] Alternative worth benchmarking: Boyer–Lindquist with the conserved `E`, `L_z` and Carter constant `Q`
-      (first-order equations, Carter 1968). Faster per step, but needs sign tracking at radial and polar
-      turning points.
-- [ ] Use the conserved quantities as an accuracy monitor: the drift of `H`, `E = −p_t`, `L_z = p_φ` along
-      a ray, shown as a debug view; adapt the step size until it is below ~1e-4 everywhere in float.
-- [ ] **Camera as a physical observer.** Build an orthonormal tetrad at the camera position — the
-      zero-angular-momentum observer (ZAMO, Bardeen, Press & Teukolsky 1972) — turn each pixel's direction
-      `n` into the local photon momentum `p^(a) = (1, n)` and then into `p^μ = e_(a)^μ p^(a)`. Later: a
-      camera moving relative to the ZAMO (Lorentz boost of the tetrad → aberration), e.g. on a circular
-      orbit or falling in. See James et al. 2015 (DNGR), Appendix A, for the full construction.
-- [ ] Keep the camera outside the horizon (`r > r+ + margin`); inside the ergosphere it cannot be static,
-      which the ZAMO frame handles.
-- [ ] **Validation: Kerr shadow outline.** Overlay the analytic critical curve (Bardeen 1973): for photon
-      orbit radii `r` between the prograde and retrograde ones,
-      `ξ = (r²(3 − r) − a²(r + 1)) / (a(r − 1))`, `η = r³(4a² − r(r − 3)²) / (a²(r − 1)²)`; an observer at
-      infinity and inclination `θ_o` sees `α = −ξ / sin θ_o`, `β = ±√(η + a² cos²θ_o − ξ² cot²θ_o)`. The
-      traced shadow edge must match it (D-shaped and shifted for high spin).
-- [ ] Precision study: float everywhere vs. double (`GL_ARB_gpu_shader_fp64`) near the horizon and photon
-      ring; fp64 only behind a toggle if float is visibly insufficient.
+- [x] **Hamiltonian equations in outgoing Kerr–Schild Cartesian coordinates**, inverse metric in closed
+      form, gradients of `r`, `f` and `l·p` derived analytically (`physics/Geodesic.cpp`) and checked
+      against finite differences of `H`. Float copy in `shaders/common/kerr.glsl`.
+- [x] **Outgoing, not ingoing, coordinates**: rays run backwards in time, so captured rays approach the
+      *past* horizon, where the usual ingoing form is singular (H blew up to 1e10 before capture).
+- [x] **Backward tracing with `p = −u + n`** (past-directed). Tracing `u + n` is only equivalent in
+      static spacetimes; in Kerr it mirrors the spin. Pinned by the asymmetric camera test below.
+- [x] **ZAMO camera**: tetrad built on the CPU in double (`kerr::zamoTetrad`), uploaded lowered, so a pixel's
+      initial momentum is one mat4 × vec4 on the GPU. Tests: orthonormal, future-directed, constant r,
+      co-rotates at the frame-dragging `ω`.
+- [x] **Validation**: equatorial capture thresholds at the prograde/retrograde critical `ξ` (Bardeen 1973),
+      for rays from infinity and through camera pixels (which fixes the rotation sense); the analytic
+      shadow edge overlaid in the app (*Analytic shadow edge*) matches the traced edge to ~1 px at r = 30.
+- [x] **Precision**: float is enough. Constraint error ~1e-7 on the disk, ~1e-5 in the sky, ~1e-4 next to
+      the photon ring at step scale 0.02 (0.03: ~4e-4, 30 % faster). One pixel is ~1e-3 rad.
+- [x] Escape radius: the coordinate direction at r = 200 is within 1e-5 rad of the asymptotic one (outgoing
+      Kerr–Schild coordinates are built on straight null lines), so rays stop there (test).
+- [x] Thin opaque disk at `z = 0` (= Boyer–Lindquist equator) between ISCO and `r_out`, hit located on the
+      chord between steps: lensed far side and higher-order images come for free. Colour still placeholder.
+
+Measured (Release, AMD Renoir iGPU, camera at 30 M, step scale 0.02): trace 32.7 ms at 1600×900 as first
+written; 24.8 ms after rewriting the derivative around three reciprocals and cutting the escape radius
+from 1000 to 200; 14.1 ms at the new default render scale 0.75 (66 FPS). The tracer is ALU-bound
+(~1.8 TFLOP/s effective, ~100 steps × 4 derivative evaluations per pixel).
+
+Follow-ups:
+- [ ] Benchmark the Boyer–Lindquist alternative (conserved `E`, `L_z`, Carter `Q`, first-order equations,
+      Carter 1968): fewer operations per step, but turning points need sign tracking.
+- [ ] Adaptive step size from an embedded error estimate (RK45 / Dormand–Prince) instead of `h ∝ r^1.5`:
+      most of the error is next to the photon ring, most of the cost elsewhere.
+- [ ] Moving cameras: boost the ZAMO tetrad (circular orbit, free fall), giving aberration.
+- [ ] Compare a CPU reference image with a GPU readback (Stage 7) to catch drift between the C++ and GLSL copies.
 
 ## Stage 4 — Accretion disk (optional, toggle)
 
-- [ ] **Geometry**: geometrically thin, optically thick disk in the equatorial plane from `r_ISCO` to
-      `r_out`. Detect the crossing of `z = 0` between two integration steps and locate it by linear
-      interpolation or bisection.
+- [x] **Geometry**: geometrically thin, optically thick disk in the equatorial plane from `r_ISCO` to
+      `r_out`, crossing of `z = 0` located on the chord between two steps (done in Stage 3). Bisection if
+      the chord turns out too coarse once the emission is physical.
 - [ ] **Emitter motion**: circular Keplerian orbits, `u^μ = u^t (1, 0, 0, Ω)` in BL with
       `Ω = ±1/(r^{3/2} ± a)` (`kerr::keplerianAngularVelocity`) and
       `u^t = 1/√(−(g_tt + 2Ω g_tφ + Ω² g_φφ))`.

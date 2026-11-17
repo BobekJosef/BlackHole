@@ -3,6 +3,11 @@ target_link_libraries(test_kerr PRIVATE bh_physics)
 blackhole_configure_target(test_kerr)
 add_test(NAME kerr COMMAND test_kerr)
 
+add_executable(test_geodesic test_geodesic.cpp)
+target_link_libraries(test_geodesic PRIVATE bh_physics)
+blackhole_configure_target(test_geodesic)
+add_test(NAME geodesic COMMAND test_geodesic)
+
 add_executable(test_shader_preprocessor test_shader_preprocessor.cpp)
 target_link_libraries(test_shader_preprocessor PRIVATE bh_shadertools)
 blackhole_configure_target(test_shader_preprocessor)
