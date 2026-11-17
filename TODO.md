@@ -17,22 +17,34 @@ Units `G = c = M = 1`, signature `(-,+,+,+)`, spin axis `+z` (see CLAUDE.md, "Ph
 - [x] `bh_physics`: horizon, ergosphere, ISCO, photon orbit, Keplerian Ω, with unit tests
 - [x] Placeholder shader: straight rays, 3√3 M "shadow" sphere, flat disk from the ISCO, procedural stars
 
-## Stage 1 — Rendering infrastructure
+## Stage 1 — Rendering infrastructure ✅
 
 The geodesic tracer is expensive, so the frame is structured for it before the physics arrives.
 
-- [ ] **Compute shader** traces into an `rgba16f` image (`glDispatchCompute`, 8×8 or 16×16 work groups,
-      `imageStore`); a full-screen pass tone-maps it into the default framebuffer.
-- [ ] **Resolution scale** slider (render at 25–100 % and upscale bilinearly) — the main performance knob.
-- [ ] **HDR pipeline**: physical radiance in, ACES or AgX tone mapping out, exposure in EV.
-- [ ] **Bloom** (dual-filter / Kawase down- and up-sampling chain). Real optics, not an effect: the disk's
-      inner edge is orders of magnitude brighter than the rest.
-- [ ] **GPU timing** with `GL_TIME_ELAPSED` queries (double-buffered so they never stall), shown per pass in
-      the panel. Turn VSync off when measuring.
-- [ ] **Per-frame UBO** (`std140`) instead of individual uniforms, with `static_assert`s on the C++ layout.
-- [ ] **`#include` for GLSL** (a small preprocessor in `ShaderProgram`) so `kerr.glsl`, `disk.glsl`,
-      `sky.glsl`, `color.glsl` are shared between passes; report errors with the original file and line.
-- [ ] Auto-reload shaders when a file's modification time changes (poll once per second).
+- [x] **Compute shader** (`trace.comp`, 8×8 work groups) traces into an HDR image; a full-screen pass
+      (`present.frag`) tone-maps it into the default framebuffer.
+- [x] **Resolution scale** slider (25–100 %, bilinear up-scaling) — the main performance knob.
+- [x] **HDR pipeline**: linear radiance in, AgX (default) / ACES (Hill fit) / exponential / clamp out,
+      exposure in EV, exact sRGB encoding, dithering against banding.
+- [x] **Bloom**: Jimenez (SIGGRAPH 2014) 13-tap down-sampling chain with a Karis average on the first step,
+      tent-filter up-sampling, mixed in energy-conserving (`mix`, not add).
+- [x] **GPU timing** with `GL_TIMESTAMP` queries, 4 frames in flight so they never stall; per pass in the panel.
+- [x] **Per-frame UBO** (`std140`, `FrameUniforms.hpp` ↔ `common/frame.glsl`) with `static_assert`ed offsets.
+- [x] **`#include` for GLSL** (`ShaderPreprocessor`, unit-tested): one source-string number per file via
+      `#line`, driver logs mapped back to `file:line` for Mesa, NVIDIA and AMD/Intel log formats.
+- [x] Reload on save (directory polled once per second); a failed reload keeps the previous programs.
+- [x] CTest validates every shader with `glslangValidator` when it is installed.
+
+Measured (Release, 1600×900, AMD Renoir iGPU, flat-space placeholder): trace 1.5 ms, bloom 0.9 ms,
+present 0.7 ms. Switching the HDR targets from `rgba16f` to `r11f_g11f_b10f` halved bloom (1.85 → 0.87 ms):
+on integrated GPUs the post-processing is bandwidth-bound.
+
+Follow-ups, when they matter:
+- [ ] Present costs 0.7 ms at full HD on the iGPU: fold tone mapping into a compute pass, or precompute AgX
+      as a 3D LUT, once the trace pass is no longer the bottleneck.
+- [ ] Revisit `r11f_g11f_b10f` precision for the radiance image once the disk has physical (very large)
+      brightness ratios; switch the radiance target alone back to `rgba16f` if banding appears.
+- [ ] A `--benchmark` mode: fixed camera path, VSync off, timings written to stdout (for comparing changes).
 
 ## Stage 2 — Schwarzschild lensing (`a = 0`)
 

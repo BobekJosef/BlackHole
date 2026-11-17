@@ -59,6 +59,9 @@ struct TextureDeleter {
 struct BufferDeleter {
     void operator()(const GLuint name) const noexcept { glDeleteBuffers(1, &name); }
 };
+struct QueryDeleter {
+    void operator()(const GLuint name) const noexcept { glDeleteQueries(1, &name); }
+};
 
 } // namespace detail
 
@@ -67,12 +70,34 @@ using Shader = Object<detail::ShaderDeleter>;
 using VertexArray = Object<detail::VertexArrayDeleter>;
 using Texture = Object<detail::TextureDeleter>;
 using Buffer = Object<detail::BufferDeleter>;
+using Query = Object<detail::QueryDeleter>;
 
 [[nodiscard]] inline VertexArray createVertexArray()
 {
     GLuint name {};
     glGenVertexArrays(1, &name); // not glCreateVertexArrays: that is OpenGL 4.5, the minimum here is 4.3
     return VertexArray {name};
+}
+
+[[nodiscard]] inline Buffer createBuffer()
+{
+    GLuint name {};
+    glGenBuffers(1, &name);
+    return Buffer {name};
+}
+
+[[nodiscard]] inline Texture createTexture()
+{
+    GLuint name {};
+    glGenTextures(1, &name);
+    return Texture {name};
+}
+
+[[nodiscard]] inline Query createQuery()
+{
+    GLuint name {};
+    glGenQueries(1, &name);
+    return Query {name};
 }
 
 } // namespace bh::gl

@@ -1,0 +1,64 @@
+#version 430 core
+#extension GL_GOOGLE_include_directive : enable
+
+// Traces one ray per pixel and stores linear HDR radiance.
+//
+// Stage 0 placeholder physics: rays travel in STRAIGHT lines (flat space, no lensing).
+// The shadow is an opaque sphere of the Schwarzschild critical impact parameter 3*sqrt(3) M
+// and the disk a flat annulus from the ISCO outwards. Stages 2/3 of TODO.md replace this with
+// geodesic integration in the Kerr metric.
+//
+// Units G = c = M = 1. World frame: spin axis +z, disk in the plane z = 0.
+
+#include "common/disk.glsl"
+#include "common/frame.glsl"
+#include "common/sky.glsl"
+
+layout(local_size_x = 8, local_size_y = 8) in;
+
+layout(r11f_g11f_b10f, binding = 0) uniform writeonly image2D uRadiance;
+
+const float INFINITY = 1.0e30;
+
+void main()
+{
+    ivec2 pixel = ivec2(gl_GlobalInvocationID.xy);
+    if (any(greaterThanEqual(pixel, ivec2(uResolution)))) {
+        return;
+    }
+
+    vec2 screen = (2.0 * (vec2(pixel) + 0.5) - uResolution) / uResolution.y; // y in [-1, 1]
+    vec3 direction = normalize(mat3(uCameraBasis) * vec3(screen * uTanHalfFov, 1.0));
+    vec3 origin = uCameraPosition.xyz;
+
+    // Nearest hit with the shadow sphere.
+    float tHole = INFINITY;
+    float halfB = dot(origin, direction);
+    float discriminant = halfB * halfB - (dot(origin, origin) - uShadowRadius * uShadowRadius);
+    if (discriminant >= 0.0) {
+        float t = -halfB - sqrt(discriminant);
+        if (t > 0.0) {
+            tHole = t;
+        }
+    }
+
+    // Hit with the disk plane z = 0.
+    float tDisk = INFINITY;
+    vec3 diskColor = vec3(0.0);
+    if (hasFlag(FLAG_DISK) && abs(direction.z) > 1.0e-6) {
+        float t = -origin.z / direction.z;
+        float r = length((origin + t * direction).xy);
+        if (t > 0.0 && r >= uDiskInnerRadius && r <= uDiskOuterRadius) {
+            tDisk = t;
+            diskColor = diskEmission(r);
+        }
+    }
+
+    vec3 radiance = vec3(0.0);
+    if (tDisk < tHole) {
+        radiance = diskColor;
+    } else if (tHole == INFINITY && hasFlag(FLAG_STARS)) {
+        radiance = starfield(direction);
+    }
+    imageStore(uRadiance, pixel, vec4(radiance, 1.0));
+}

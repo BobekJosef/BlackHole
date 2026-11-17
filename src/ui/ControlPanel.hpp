@@ -1,7 +1,11 @@
 #pragma once
 
+#include "render/GpuPass.hpp"
 #include "scene/SceneSettings.hpp"
 
+#include <glm/glm.hpp>
+
+#include <array>
 #include <string_view>
 
 namespace bh {
@@ -10,6 +14,8 @@ namespace bh {
 struct PanelInfo {
     double fps {};
     double frameMilliseconds {};
+    std::array<double, gpuPassNames.size()> gpuMilliseconds {};
+    glm::ivec2 traceResolution {};
     double cameraDistance {};
     std::string_view glRenderer {};
     std::string_view shaderError {};

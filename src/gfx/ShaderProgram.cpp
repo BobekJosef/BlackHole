@@ -1,9 +1,9 @@
 #include "gfx/ShaderProgram.hpp"
 
+#include "gfx/ShaderPreprocessor.hpp"
+
 #include <glm/gtc/type_ptr.hpp>
 
-#include <fstream>
-#include <sstream>
 #include <utility>
 #include <vector>
 
@@ -19,17 +19,6 @@ namespace {
     case ShaderStage::COMPUTE: return GL_COMPUTE_SHADER;
     }
     std::unreachable();
-}
-
-[[nodiscard]] std::expected<std::string, std::string> readFile(const std::filesystem::path& path)
-{
-    std::ifstream file {path, std::ios::binary};
-    if (!file) {
-        return std::unexpected {"cannot open " + path.string()};
-    }
-    std::ostringstream contents {};
-    contents << file.rdbuf();
-    return contents.str();
 }
 
 [[nodiscard]] std::string shaderLog(const GLuint shader)
@@ -52,19 +41,19 @@ namespace {
 
 [[nodiscard]] std::expected<Shader, std::string> compile(const ShaderFile& file)
 {
-    const auto source {readFile(file.path)};
+    const auto source {preprocessShader(file.path)};
     if (!source) {
         return std::unexpected {source.error()};
     }
     Shader shader {glCreateShader(glStage(file.stage))};
-    const GLchar* const text {source->c_str()};
+    const GLchar* const text {source->source.c_str()};
     glShaderSource(shader.get(), 1, &text, nullptr);
     glCompileShader(shader.get());
 
     GLint status {};
     glGetShaderiv(shader.get(), GL_COMPILE_STATUS, &status);
     if (status != GL_TRUE) {
-        return std::unexpected {file.path.filename().string() + ":\n" + shaderLog(shader.get())};
+        return std::unexpected {annotateShaderLog(shaderLog(shader.get()), source->files)};
     }
     return shader;
 }

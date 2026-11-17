@@ -1,0 +1,33 @@
+#version 430 core
+#extension GL_GOOGLE_include_directive : enable
+
+// One step of the bloom up-sampling chain (Jimenez 2014): a 3x3 tent filter of the smaller
+// level, added onto the larger level, which still holds its down-sampled image. After the last
+// step the largest level holds the sum of all blur radii.
+
+layout(local_size_x = 8, local_size_y = 8) in;
+
+layout(binding = 0) uniform sampler2D uSource;            // half the target size
+layout(r11f_g11f_b10f, binding = 0) uniform image2D uTarget;     // read and accumulated
+
+uniform float uFilterRadius; // in source texels
+
+void main()
+{
+    ivec2 pixel = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 size = imageSize(uTarget);
+    if (any(greaterThanEqual(pixel, size))) {
+        return;
+    }
+    vec2 uv = (vec2(pixel) + 0.5) / vec2(size);
+    vec2 d = uFilterRadius / vec2(textureSize(uSource, 0));
+
+    vec3 sum = 4.0 * textureLod(uSource, uv, 0.0).rgb;
+    sum += 2.0 * (textureLod(uSource, uv + vec2(0.0, d.y), 0.0).rgb + textureLod(uSource, uv - vec2(0.0, d.y), 0.0).rgb
+                  + textureLod(uSource, uv + vec2(d.x, 0.0), 0.0).rgb + textureLod(uSource, uv - vec2(d.x, 0.0), 0.0).rgb);
+    sum += textureLod(uSource, uv + d, 0.0).rgb + textureLod(uSource, uv - d, 0.0).rgb
+         + textureLod(uSource, uv + vec2(d.x, -d.y), 0.0).rgb + textureLod(uSource, uv + vec2(-d.x, d.y), 0.0).rgb;
+
+    vec3 current = imageLoad(uTarget, pixel).rgb;
+    imageStore(uTarget, pixel, vec4(current + sum / 16.0, 1.0));
+}

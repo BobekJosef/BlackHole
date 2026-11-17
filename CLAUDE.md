@@ -6,8 +6,13 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 BlackHole is an interactive, physically based renderer of a rotating (Kerr) black hole with an optional
 accretion disk and a configurable background. The rendering runs on the GPU (OpenGL 4.3 core, GLSL);
-the C++ side owns the window, input, UI and the closed-form physics. `TODO.md` is the roadmap. The
-current shader is the Stage 0 flat-space placeholder: rays are straight lines, there is no lensing yet.
+the C++ side owns the window, input, UI and the closed-form physics. `TODO.md` is the roadmap; Stages 0–1
+are done. The physics in `trace.comp` is still the flat-space placeholder: rays are straight lines, there is
+no lensing yet (Stage 2).
+
+A frame is three GPU passes (`BlackHoleRenderer`): **trace** (compute, one ray per pixel at
+`renderScale` × window size → HDR radiance image) → **bloom** (compute down/up-sampling chain) →
+**present** (fragment: up-scale, bloom mix, exposure, tone mapping, sRGB). ImGui draws on top.
 
 Stack: C++23, CMake ≥ 3.25, OpenGL 4.3 core, GLFW 3.4, GLAD 2 (vendored), GLM 1.0, Dear ImGui 1.91.
 macOS is unsupported (OpenGL stops at 4.1 there, and compute shaders need 4.3).
@@ -34,9 +39,12 @@ the process when done.
 - Linux needs the X11 headers for GLFW: `libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev`,
   and `libgl-dev`. GLFW's Wayland backend is off by default (`-DGLFW_BUILD_WAYLAND=ON` enables it).
 - Shaders are read at run time from the source tree (`config::shaderDir`, generated into
-  `build/*/src/generated/blackhole/config.hpp`), so a shader edit needs no rebuild: press **R** in the app
-  to recompile. A failed recompile keeps the previous program and shows the log in the panel.
-- `glslangValidator shaders/*.vert shaders/*.frag` checks GLSL without running the app.
+  `build/*/src/generated/blackhole/config.hpp`), so a shader edit needs no rebuild: the app recompiles
+  within a second of a save (or on **R**). A failed recompile keeps the previous programs and shows the
+  log, mapped to `file:line`, at the top of the panel.
+- With `glslang-tools` installed, `ctest` also validates every shader offline (tests `glsl:<file>`). By hand:
+  `glslangValidator -G --aml -Ishaders -o /dev/null shaders/trace.comp`. `-G` (OpenGL SPIR-V) is required:
+  in plain GLSL mode glslang does not resolve `#include`.
 - Debug builds create a debug GL context; `gl::enableDebugOutput` prints every driver message above
   "notification" to stderr. Any such message is a bug.
 
@@ -44,13 +52,16 @@ the process when done.
 
 ```
 src/physics/   closed-form Kerr formulas (bh_physics library; no OpenGL, unit-tested)
-src/gfx/       thin OpenGL/GLFW wrappers: Window, GlObject (RAII names), ShaderProgram, GlDebug
-src/render/    BlackHoleRenderer and FrameParams (everything uploaded per frame)
+src/gfx/       thin OpenGL/GLFW wrappers: Window, GlObject (RAII names), ShaderProgram, GlDebug, GpuTimer;
+               ShaderPreprocessor (GLSL #include; no GL, so its own bh_shadertools library, unit-tested)
+src/render/    BlackHoleRenderer (the passes), FrameParams (CPU-side frame description),
+               FrameUniforms (std140 mirror of shaders/common/frame.glsl), GpuPass (timed sections)
 src/scene/     OrbitCamera, SceneSettings (what the UI edits)
 src/ui/        ImGuiLayer (context + backends), ControlPanel
 src/app/       Application: owns everything, runs the frame loop
-shaders/       GLSL sources
-tests/         CTest executables (bh_physics only; no GL context in tests)
+shaders/       main shaders: trace.comp, bloom_*.comp, fullscreen.vert + present.frag
+shaders/common/ shared GLSL headers: frame (UBO), color (tone mapping, sRGB), sky, disk, random
+tests/         CTest executables (bh_physics, bh_shadertools; no GL context in tests) + GLSL validation
 external/glad/ vendored loader
 ```
 
@@ -74,8 +85,19 @@ is converted to GPU quantities in one place (`Application::frameParams`).
 
 ## GPU and GLSL conventions
 
-- `#version 430 core` in every shader. Uniforms `uCamelCase`, stage inputs/outputs `vCamelCase`, constants
-  `UPPER_SNAKE_CASE`; functions and locals `camelCase` as in C++.
+- `#version 430 core` in every main shader, followed by `#extension GL_GOOGLE_include_directive : enable`
+  (for glslang; `ShaderPreprocessor` blanks it). Shared code goes in `shaders/common/*.glsl` with an
+  `#ifndef NAME_GLSL` guard (the preprocessor does not deduplicate) and is pulled in with
+  `#include "common/x.glsl"`, resolved relative to the including file.
+- Uniforms `uCamelCase`, stage inputs/outputs `vCamelCase`, constants `UPPER_SNAKE_CASE`; functions and
+  locals `camelCase` as in C++. GLSL `#define` only for include guards.
+- Per-frame scene data goes in the `Frame` UBO (binding 0); a new field changes `common/frame.glsl` and
+  `FrameUniforms.hpp` together, with a new `static_assert`. Pass-specific knobs stay plain uniforms.
+- Compute shaders use 8×8 work groups (`workGroupSize` in the renderer) and return early outside the image.
+  After a dispatch that writes an image, `glMemoryBarrier` before anything reads it.
+- HDR images are `r11f_g11f_b10f` (`hdrFormat`): half the bandwidth of `rgba16f`, which halved the bloom
+  cost on an iGPU. The image format qualifiers in the shaders must match it.
+- Enum values shared with GLSL (`ToneMapper` ↔ `TONE_MAPPER_*`) have explicit values on both sides.
 - `float` on the GPU. `double` in GLSL (fp64) runs at 1/16–1/64 of the float rate on consumer GPUs: use it
   only behind a toggle and after measuring. Write formulas so float suffices (e.g. work with `r - r+`
   near the horizon, not `r`).
@@ -85,8 +107,9 @@ is converted to GPU quantities in one place (`Application::frameParams`).
   extension) first. In particular the 4.5 direct-state-access calls (`glCreate*`, `glNamed*`, `glTexture*`)
   are off limits until the minimum is raised; use `glGen*` + bind. Set uniforms through `ShaderProgram::set`
   (`glProgramUniform*`, core since 4.1, no bind needed).
-- Performance claims are measured in a Release build (GL timer queries once they exist, TODO.md Stage 1),
-  not judged from a Debug build or from vsync-capped FPS.
+- Performance claims are measured in a Release build with the panel's GPU timings (`gl::GpuTimer`,
+  per pass), not from a Debug build or from vsync-capped FPS. Record before/after numbers in TODO.md.
+- A new GPU pass gets an entry in `GpuPass`/`gpuPassNames` and an `endSection` call, in submission order.
 
 ## Code conventions
 

@@ -5,8 +5,15 @@
 
 namespace bh {
 
+// The values are the TONE_MAPPER_* constants in shaders/common/color.glsl.
+enum class ToneMapper { AGX = 0, ACES = 1, EXPONENTIAL = 2, CLAMP = 3 };
+
 struct FrameParams {
-    glm::ivec2 resolution {};
+    // Output and resolution
+    glm::ivec2 outputSize {};  // window framebuffer in pixels
+    float renderScale {1.0F};  // trace resolution / output resolution
+
+    // Scene
     glm::vec3 cameraPosition {};
     glm::mat3 cameraBasis {1.0F};
     float tanHalfFov {};
@@ -15,8 +22,13 @@ struct FrameParams {
     float diskInnerRadius {};
     float diskOuterRadius {};
     bool starsEnabled {};
-    float exposure {};
     float time {};
+
+    // Post-processing
+    float exposure {1.0F}; // linear factor
+    ToneMapper toneMapper {ToneMapper::AGX};
+    bool bloomEnabled {};
+    float bloomStrength {};
 };
 
 } // namespace bh

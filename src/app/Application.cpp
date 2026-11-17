@@ -2,6 +2,7 @@
 
 #include "blackhole/config.hpp"
 #include "physics/Kerr.hpp"
+#include "render/GpuPass.hpp"
 #include "ui/ControlPanel.hpp"
 
 #include <glad/gl.h>
@@ -17,6 +18,7 @@ namespace {
 
 // Weight of the newest frame in the exponential moving average of the frame time.
 constexpr double frameTimeSmoothing = 0.05;
+constexpr double shaderPollSeconds = 1.0;
 
 [[nodiscard]] std::string glString(const GLenum name)
 {
@@ -32,6 +34,7 @@ Application::Application()
                             .debugContext = config::debugBuild}}
     , m_gui {m_window.handle()}
     , m_renderer {std::filesystem::path {config::shaderDir}}
+    , m_gpuTimer {gpuPassNames.size()}
     , m_glRenderer {glString(GL_RENDERER) + " | OpenGL " + glString(GL_VERSION)}
     , m_lastCursor {m_window.cursorPosition()}
 {
@@ -54,15 +57,20 @@ void Application::run()
         lastTime = now;
 
         handleInput();
+        pollShaderFiles(now);
+
+        PanelInfo info {.fps = 1.0 / m_smoothedFrameSeconds,
+                        .frameMilliseconds = 1000.0 * m_smoothedFrameSeconds,
+                        .traceResolution = m_renderer.traceResolution(),
+                        .cameraDistance = static_cast<double>(m_camera.distance()),
+                        .glRenderer = m_glRenderer,
+                        .shaderError = m_shaderError};
+        for (std::size_t pass {0}; pass < gpuPassNames.size(); ++pass) {
+            info.gpuMilliseconds[pass] = m_gpuTimer.milliseconds(pass);
+        }
 
         m_gui.beginFrame();
-        const PanelActions actions {drawControlPanel(m_settings,
-                                                     PanelInfo {.fps = 1.0 / m_smoothedFrameSeconds,
-                                                                .frameMilliseconds = 1000.0 * m_smoothedFrameSeconds,
-                                                                .cameraDistance = static_cast<double>(m_camera.distance()),
-                                                                .glRenderer = m_glRenderer,
-                                                                .shaderError = m_shaderError})};
-        if (actions.reloadShaders) {
+        if (drawControlPanel(m_settings, info).reloadShaders) {
             reloadShaders();
         }
         if (m_settings.vsync != m_vsync) {
@@ -71,8 +79,10 @@ void Application::run()
         }
         m_camera.setVerticalFovDegrees(m_settings.fovDegrees);
 
-        m_renderer.draw(frameParams(framebuffer, static_cast<float>(now)));
+        m_gpuTimer.beginFrame();
+        m_renderer.draw(frameParams(framebuffer, static_cast<float>(now)), m_gpuTimer);
         m_gui.endFrame();
+        m_gpuTimer.endSection(index(GpuPass::UI));
         m_window.swapBuffers();
     }
 }
@@ -108,7 +118,8 @@ FrameParams Application::frameParams(const glm::ivec2 framebufferSize, const flo
 {
     const double a {static_cast<double>(m_settings.spin)};
     return FrameParams {
-        .resolution = framebufferSize,
+        .outputSize = framebufferSize,
+        .renderScale = m_settings.renderScale,
         .cameraPosition = m_camera.position(),
         .cameraBasis = m_camera.basis(),
         .tanHalfFov = std::tan(glm::radians(m_camera.verticalFovDegrees()) / 2.0F),
@@ -117,8 +128,11 @@ FrameParams Application::frameParams(const glm::ivec2 framebufferSize, const flo
         .diskInnerRadius = static_cast<float>(kerr::iscoRadius(a, m_settings.diskOrbit)),
         .diskOuterRadius = m_settings.diskOuterRadius,
         .starsEnabled = m_settings.starsEnabled,
-        .exposure = m_settings.exposure,
         .time = time,
+        .exposure = std::exp2(m_settings.exposureEv),
+        .toneMapper = m_settings.toneMapper,
+        .bloomEnabled = m_settings.bloomEnabled,
+        .bloomStrength = m_settings.bloomStrength,
     };
 }
 
@@ -126,6 +140,17 @@ void Application::reloadShaders()
 {
     const auto result {m_renderer.reloadShaders()};
     m_shaderError = result ? std::string {} : result.error();
+}
+
+void Application::pollShaderFiles(const double now)
+{
+    if (!m_settings.autoReloadShaders || now < m_nextShaderPoll) {
+        return;
+    }
+    m_nextShaderPoll = now + shaderPollSeconds;
+    if (m_renderer.shaderSourcesChanged()) {
+        reloadShaders();
+    }
 }
 
 } // namespace bh

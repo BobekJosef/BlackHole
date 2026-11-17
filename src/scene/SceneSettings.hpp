@@ -2,6 +2,7 @@
 // User-tunable parameters, edited by the control panel.
 
 #include "physics/Kerr.hpp"
+#include "render/FrameParams.hpp"
 
 namespace bh {
 
@@ -17,10 +18,19 @@ struct SceneSettings {
     // Background
     bool starsEnabled {true};
 
-    // Camera and image
+    // Camera
     float fovDegrees {60.0F};
-    float exposure {1.0F};
+
+    // Image
+    float renderScale {1.0F}; // trace resolution / window resolution
+    ToneMapper toneMapper {ToneMapper::AGX};
+    float exposureEv {0.0F}; // exposure = 2^EV
+    bool bloomEnabled {true};
+    float bloomStrength {0.04F};
+
+    // Performance and development
     bool vsync {true};
+    bool autoReloadShaders {true};
 };
 
 } // namespace bh
