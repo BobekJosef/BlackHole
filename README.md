@@ -27,6 +27,8 @@ accretion disk with relativistic Doppler and gravitational redshift — that you
 - Validation tools: debug views (step count, integration error, ray fate, redshift, magnification) and an
   overlay of the analytic shadow edge
 - HDR pipeline: bloom and tone mapping (AgX or ACES)
+- Observers: a static camera (the zero-angular-momentum observer), one orbiting at the Keplerian speed, or
+  one falling freely into the hole, each seeing the aberration and Doppler shift its motion causes
 - Orbit camera (drag to rotate, scroll to zoom), adjustable field of view, exposure in EV
 - Dear ImGui panel: spin `a/M`, prograde/retrograde disk, disk on/off and size, background choice,
   brightness and orientation, integrator step size and step limit, render scale (25–100 % of the window resolution), tone mapper, bloom

@@ -23,6 +23,11 @@ void OrbitCamera::orbit(const glm::vec2 cursorDelta)
     m_polar = std::clamp(m_polar - cursorDelta.y * radiansPerPixel, poleMargin, std::numbers::pi_v<float> - poleMargin);
 }
 
+void OrbitCamera::turn(const float azimuthRadians)
+{
+    m_azimuth = std::remainder(m_azimuth + azimuthRadians, 2.0F * std::numbers::pi_v<float>);
+}
+
 void OrbitCamera::zoom(const double steps)
 {
     m_distance = std::clamp(m_distance * std::exp(-zoomPerStep * static_cast<float>(steps)), minDistance, maxDistance);
@@ -39,9 +44,8 @@ glm::vec3 OrbitCamera::position() const
     return m_distance * glm::vec3 {sinPolar * std::cos(m_azimuth), sinPolar * std::sin(m_azimuth), std::cos(m_polar)};
 }
 
-glm::mat3 OrbitCamera::basis() const
+glm::mat3 OrbitCamera::lookAlong(const glm::vec3& forward)
 {
-    const glm::vec3 forward {-glm::normalize(position())};
     const glm::vec3 right {glm::normalize(glm::cross(forward, glm::vec3 {0.0F, 0.0F, 1.0F}))};
     const glm::vec3 up {glm::cross(right, forward)};
     return glm::mat3 {right, up, forward};

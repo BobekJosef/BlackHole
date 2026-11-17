@@ -63,7 +63,8 @@ a wrapper shell, so `kill` leaves the window open), kill it, and confirm with `p
 src/physics/   bh_physics (no OpenGL, no GLM, double precision, unit-tested):
                Kerr (closed forms, shadow outline), KerrSchild (metric, ZAMO tetrad),
                Geodesic (Hamiltonian equations, RK4 tracer: the CPU reference for the shaders),
-               Disk (Page-Thorne flux, temperature profile, redshift g), Blackbody (Planck x CIE -> sRGB)
+               Disk (Page-Thorne flux, temperature profile, redshift g), Blackbody (Planck x CIE -> sRGB),
+               Observer (Keplerian and free-falling cameras: timelike geodesics in proper time)
 src/assets/    bh_assets (no OpenGL, unit-tested): SkyImage (stb_image decoding of equirectangular and
                cube maps; runs on a worker thread, Application::updateSkyImage)
 src/gfx/       thin OpenGL/GLFW wrappers: Window, GlObject (RAII names), ShaderProgram, GlDebug, GpuTimer;
@@ -97,8 +98,12 @@ is converted to GPU quantities in one place (`Application::frameParams`).
   for everything traced (camera position, rays, disk hits). In them `z = r cos θ` exactly, and on the
   equator `r = √(x² + y² − a²)`. Outgoing because rays run backwards in time and captured ones approach
   the past horizon, where the ingoing form is singular (see `KerrSchild.hpp`).
-- Camera rays are **past-directed**: `p = −u + n` for a pixel looking along `n` in the ZAMO frame `u`.
+- Camera rays are **past-directed**: `p = −u + n` for a pixel looking along `n` in the camera frame `u`.
   Never `u + n`: that is only equivalent in static spacetimes and mirrors the spin in Kerr.
+- The camera is any observer: `kerr::observerTetrad` around its 4-velocity (the ZAMO, a Keplerian
+  orbiter, a free faller). Nothing downstream may assume the ZAMO: shifts are `1/(p·u_source)` with
+  `p·u_camera = 1`, which holds for every observer. Analytic overlays that do assume it (the Bardeen
+  shadow edge) are hidden for moving cameras.
 - Light from the disk: a black body at `T` seen with shift `g` is a black body at `gT` (`I_ν/ν³` invariant),
   so radiance is one look-up of `gT` in the Planck table: never multiply by an extra `g⁴`. Ray momenta are
   normalised so the camera ZAMO measures frequency 1, which is what makes `g = 1/(p·u_emitter)`.

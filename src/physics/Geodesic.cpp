@@ -111,6 +111,20 @@ double skyRedshift(const Photon& photon)
     return 1.0 / photon.pt;
 }
 
+Photon rungeKuttaStep(const Photon& state, const double a, const double h)
+{
+    const PhotonDerivative k1 {geodesicDerivative(state, a)};
+    const PhotonDerivative k2 {geodesicDerivative(advance(state, 0.5 * h, k1), a)};
+    const PhotonDerivative k3 {geodesicDerivative(advance(state, 0.5 * h, k2), a)};
+    const PhotonDerivative k4 {geodesicDerivative(advance(state, h, k3), a)};
+    Photon next {state};
+    for (std::size_t i {0}; i < 3; ++i) {
+        next.position[i] += h / 6.0 * (k1.position[i] + 2.0 * k2.position[i] + 2.0 * k3.position[i] + k4.position[i]);
+        next.momentum[i] += h / 6.0 * (k1.momentum[i] + 2.0 * k2.momentum[i] + 2.0 * k3.momentum[i] + k4.momentum[i]);
+    }
+    return next;
+}
+
 TraceResult traceRay(Photon photon, const double a, const TraceSettings& settings)
 {
     const double captureRadius {settings.horizonMargin * outerHorizonRadius(a)};
@@ -123,16 +137,7 @@ TraceResult traceRay(Photon photon, const double a, const TraceSettings& setting
             return TraceResult {.fate = RayFate::ESCAPED, .photon = photon, .steps = step};
         }
         const double h {r * std::min(settings.stepScale * std::sqrt(r), settings.maxStepFraction)};
-        const PhotonDerivative k1 {geodesicDerivative(photon, a)};
-        const PhotonDerivative k2 {geodesicDerivative(advance(photon, 0.5 * h, k1), a)};
-        const PhotonDerivative k3 {geodesicDerivative(advance(photon, 0.5 * h, k2), a)};
-        const PhotonDerivative k4 {geodesicDerivative(advance(photon, h, k3), a)};
-        for (std::size_t i {0}; i < 3; ++i) {
-            photon.position[i] +=
-                h / 6.0 * (k1.position[i] + 2.0 * k2.position[i] + 2.0 * k3.position[i] + k4.position[i]);
-            photon.momentum[i] +=
-                h / 6.0 * (k1.momentum[i] + 2.0 * k2.momentum[i] + 2.0 * k3.momentum[i] + k4.momentum[i]);
-        }
+        photon = rungeKuttaStep(photon, a, h);
     }
     return TraceResult {.fate = RayFate::STEP_LIMIT, .photon = photon, .steps = settings.maxSteps};
 }

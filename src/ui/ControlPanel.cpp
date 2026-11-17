@@ -17,6 +17,8 @@ constexpr std::array<const char*, 4> toneMapperNames {"AgX", "ACES (Hill fit)", 
 constexpr std::array<const char*, 6> debugViewNames {"None", "Step count", "Constraint |H| / p^2",
                                                      "Fate (captured/sky/disk/limit)", "Redshift g (disk)",
                                                      "Magnification (sky)"};
+// Indexed by Observer.
+constexpr std::array<const char*, 3> observerNames {"Static (ZAMO)", "Orbiting (Keplerian)", "Free fall"};
 // Indexed by Background.
 constexpr std::array<const char*, 4> backgroundNames {"None (black)", "Stars (procedural)", "Coordinate grid",
                                                       "Image map"};
@@ -79,6 +81,36 @@ void drawPerformance(SceneSettings& settings, const PanelInfo& info)
 }
 
 } // namespace
+
+void ControlPanel::drawCamera(SceneSettings& settings, const PanelInfo& info, PanelActions& actions)
+{
+    int observer {std::to_underlying(settings.observer)};
+    if (ImGui::Combo("Observer", &observer, observerNames.data(), static_cast<int>(observerNames.size()))) {
+        settings.observer = static_cast<Observer>(observer);
+    }
+    ImGui::SetItemTooltip("Static: at rest relative to the local frame dragging (ZAMO).\n"
+                          "Orbiting: circling at the Keplerian speed of its radius, with the disk.\n"
+                          "Free fall: dropped from rest where the camera is, falls towards the horizon.\n"
+                          "A moving camera sees aberration and Doppler shifts of everything.");
+    if (settings.observer == Observer::FREE_FALL) {
+        actions.dropAgain = ImGui::Button("Drop again");
+        ImGui::SameLine();
+    }
+    ImGui::Text("r %.2f M  v %.3f c", info.observerRadius, info.observerSpeed);
+    ImGui::SetItemTooltip("Boyer-Lindquist radius, and speed relative to the local ZAMO.");
+    if (info.properTime) {
+        ImGui::Text("Proper time %.1f M", *info.properTime);
+    }
+    if (!info.observerNote.empty()) {
+        ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
+        ImGui::TextWrapped("%.*s", static_cast<int>(info.observerNote.size()), info.observerNote.data());
+        ImGui::PopStyleColor();
+    }
+    ImGui::SliderFloat("Time scale", &settings.timeScale, 0.0F, 50.0F, "%.1f M/s", ImGuiSliderFlags_Logarithmic);
+    ImGui::SetItemTooltip("M of time per second for everything that moves: disk turbulence, orbiting and\n"
+                          "falling cameras (0 = frozen). For a 10 solar-mass hole, 1 M is 49 microseconds.");
+    ImGui::SliderFloat("Vertical FOV", &settings.fovDegrees, 10.0F, 140.0F, "%.0f deg");
+}
 
 void ControlPanel::drawBackground(SceneSettings& settings, const PanelInfo& info, PanelActions& actions)
 {
@@ -180,9 +212,6 @@ PanelActions ControlPanel::draw(SceneSettings& settings, const PanelInfo& info)
         ImGui::BeginDisabled(settings.diskTurbulence <= 0.0F);
         ImGui::SliderFloat("Eddy size", &settings.diskEddySize, 0.01F, 0.2F, "%.3f r", ImGuiSliderFlags_Logarithmic);
         ImGui::SetItemTooltip("Size of the turbulent cells, ~ the disk thickness H/r.");
-        ImGui::SliderFloat("Time scale", &settings.diskTimeScale, 0.0F, 50.0F, "%.1f M/s", ImGuiSliderFlags_Logarithmic);
-        ImGui::SetItemTooltip("Animation speed in M of coordinate time per second (0 = frozen). For a\n"
-                              "10 solar-mass hole, 1 M is 49 microseconds.");
         ImGui::EndDisabled();
         const double a {static_cast<double>(settings.spin)};
         ImGui::Text("Flux peak at r = %.2f M", kerr::novikovThorneFluxPeakRadius(a, settings.diskOrbit));
@@ -193,8 +222,7 @@ PanelActions ControlPanel::draw(SceneSettings& settings, const PanelInfo& info)
     }
 
     if (ImGui::CollapsingHeader("Camera", ImGuiTreeNodeFlags_DefaultOpen)) {
-        ImGui::SliderFloat("Vertical FOV", &settings.fovDegrees, 10.0F, 140.0F, "%.0f deg");
-        ImGui::Text("Distance %.2f M", info.cameraDistance);
+        drawCamera(settings, info, actions);
     }
 
     if (ImGui::CollapsingHeader("Ray tracing", ImGuiTreeNodeFlags_DefaultOpen)) {

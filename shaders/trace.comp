@@ -108,7 +108,9 @@ Ray traceRay(ivec2 pixel)
 
         // Crossing of the equatorial plane: locate it on the chord and test the disk's extent.
         // On z = 0 the Boyer-Lindquist radius is sqrt(x^2 + y^2 - a^2).
-        if (hasFlag(FLAG_DISK) && (previous.z > 0.0) != (x.z > 0.0)) {
+        // A strict sign change: a camera exactly in the plane (an orbiting observer) does not sit in the
+        // infinitely thin disk.
+        if (hasFlag(FLAG_DISK) && previous.z * x.z < 0.0) {
             float t = previous.z / (previous.z - x.z);
             vec3 hit = mix(previous, x, t);
             float rHit = sqrt(max(dot(hit.xy, hit.xy) - uSpin * uSpin, 0.0));

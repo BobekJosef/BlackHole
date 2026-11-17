@@ -36,6 +36,8 @@ using Metric = std::array<FourVector, 4>;
 [[nodiscard]] Metric inverseMetric(const ThreeVector& position, double a);
 
 [[nodiscard]] FourVector lower(const Metric& g, const FourVector& v);
+// v^mu = g^{mu nu} v_nu (pass the inverse metric).
+[[nodiscard]] FourVector raise(const Metric& gInverse, const FourVector& covariant);
 [[nodiscard]] double dot(const Metric& g, const FourVector& u, const FourVector& v);
 
 // Orthonormal frame of an observer: time is its 4-velocity, the spatial vectors span its rest
@@ -47,10 +49,19 @@ struct Tetrad {
     FourVector forward {};
 };
 
-// Frame of the zero-angular-momentum observer (ZAMO, Bardeen, Press & Teukolsky 1972) at
-// `position`, u_mu = -alpha grad_mu t_BL: it co-rotates with the frame dragging, at constant r and
-// theta. The spatial axes are the given coordinate directions made orthonormal by Gram-Schmidt in
-// the order forward, up, right, so "forward" is exact. Requires r > r+.
+// 4-velocity (contravariant) of the zero-angular-momentum observer (ZAMO, Bardeen, Press & Teukolsky
+// 1972) at `position`, u_mu = -alpha grad_mu t_BL: it co-rotates with the frame dragging, at constant r
+// and theta. Requires r > r+.
+[[nodiscard]] FourVector zamoVelocity(const ThreeVector& position, double a);
+
+// Frame of an observer with unit, future-directed 4-velocity `velocity` at `position`. The spatial axes are
+// the given coordinate directions projected into its rest space and made orthonormal by Gram-Schmidt in
+// the order forward, up, right, so "forward" is exact. Any observer, so a moving camera sees aberration
+// and Doppler shifts; valid wherever the coordinates are (also inside the ergosphere).
+[[nodiscard]] Tetrad observerTetrad(const ThreeVector& position, const FourVector& velocity, const ThreeVector& right,
+                                    const ThreeVector& up, const ThreeVector& forward, double a);
+
+// observerTetrad of the ZAMO.
 [[nodiscard]] Tetrad zamoTetrad(const ThreeVector& position, const ThreeVector& right, const ThreeVector& up,
                                 const ThreeVector& forward, double a);
 

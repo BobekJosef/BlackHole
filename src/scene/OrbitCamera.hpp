@@ -13,6 +13,8 @@ public:
     void orbit(glm::vec2 cursorDelta);
     // Multiplicative zoom; positive steps move closer.
     void zoom(double steps);
+    // Carries the camera around the spin axis (an orbiting observer).
+    void turn(float azimuthRadians);
 
     [[nodiscard]] float distance() const { return m_distance; }
     [[nodiscard]] float verticalFovDegrees() const { return m_fovDegrees; }
@@ -20,7 +22,10 @@ public:
 
     [[nodiscard]] glm::vec3 position() const;
     // Camera-to-world rotation; columns are right, up and forward.
-    [[nodiscard]] glm::mat3 basis() const;
+    [[nodiscard]] glm::mat3 basis() const { return lookAlong(-glm::normalize(position())); }
+
+    // Basis looking along unit `forward` with +z up: columns right, up, forward.
+    [[nodiscard]] static glm::mat3 lookAlong(const glm::vec3& forward);
 
 private:
     float m_distance {30.0F};

@@ -13,7 +13,8 @@
 
 namespace bh::kerr {
 
-// Spatial position and covariant spatial momentum p_i; p_t is constant along the ray.
+// Spatial position and covariant spatial momentum p_i; p_t is constant along the ray. Also the state of a
+// massive particle (Observer.hpp): the same Hamilton equations, with H = -1/2 instead of 0.
 struct Photon {
     ThreeVector position {};
     ThreeVector momentum {};
@@ -49,6 +50,10 @@ struct PhotonDerivative {
 // (g > 1) for a camera deep in the potential, and direction-dependent in Kerr through frame dragging
 // (the ZAMO moves relative to the static frame).
 [[nodiscard]] double skyRedshift(const Photon& photon);
+
+// One classical fourth-order Runge-Kutta step of size h of Hamilton's equations, for any geodesic: null
+// (H = 0) or timelike (H = -1/2, h in proper time).
+[[nodiscard]] Photon rungeKuttaStep(const Photon& state, double a, double h);
 
 enum class RayFate { CAPTURED, ESCAPED, STEP_LIMIT };
 

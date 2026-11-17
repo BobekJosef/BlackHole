@@ -8,6 +8,11 @@ target_link_libraries(test_geodesic PRIVATE bh_physics)
 blackhole_configure_target(test_geodesic)
 add_test(NAME geodesic COMMAND test_geodesic)
 
+add_executable(test_observer test_observer.cpp)
+target_link_libraries(test_observer PRIVATE bh_physics)
+blackhole_configure_target(test_observer)
+add_test(NAME observer COMMAND test_observer)
+
 add_executable(test_disk test_disk.cpp)
 target_link_libraries(test_disk PRIVATE bh_physics)
 blackhole_configure_target(test_disk)

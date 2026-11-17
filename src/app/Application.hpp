@@ -3,6 +3,7 @@
 #include "assets/SkyImage.hpp"
 #include "gfx/GpuTimer.hpp"
 #include "gfx/Window.hpp"
+#include "physics/Observer.hpp"
 #include "render/BlackHoleRenderer.hpp"
 #include "scene/OrbitCamera.hpp"
 #include "scene/SceneSettings.hpp"
@@ -30,6 +31,16 @@ private:
     void handleInput();
     [[nodiscard]] FrameParams frameParams(glm::ivec2 framebufferSize) const;
     void drawOverlays() const;
+
+    // The camera's observer this frame: where it is, where it looks, how it moves.
+    struct ObserverState {
+        glm::vec3 position {};
+        glm::mat3 basis {1.0F};
+        std::optional<kerr::FourVector> velocity {}; // empty: the ZAMO
+    };
+    [[nodiscard]] ObserverState observerState() const;
+    // Moves orbiting and falling cameras on by `seconds` of wall time.
+    void updateObserver(double seconds, bool dropAgain);
     void updateDiskProfile();
     // Starts decoding settings.skyImage on a worker thread when it changes, uploads it when done.
     void updateSkyImage();
@@ -58,7 +69,13 @@ private:
     bool m_orbitLatched {}; // toggled by a wheel click: orbit without holding a button
     double m_smoothedFrameSeconds {1.0 / 60.0};
     double m_nextShaderPoll {};
-    double m_coordinateTime {}; // animation clock in M, advanced at settings.diskTimeScale
+    double m_coordinateTime {}; // animation clock in M, advanced at settings.timeScale
+
+    // Free fall: the timelike geodesic of the camera, its proper time, the spin it was integrated with.
+    std::optional<kerr::Photon> m_fall {};
+    double m_fallProperTime {};
+    float m_fallSpin {};
+    std::string m_observerNote {};
 
     // Inputs of the disk temperature profile last uploaded; empty before the first upload.
     struct DiskProfileKey {

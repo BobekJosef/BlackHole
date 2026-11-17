@@ -7,6 +7,7 @@
 
 #include <array>
 #include <filesystem>
+#include <optional>
 #include <span>
 #include <string>
 #include <string_view>
@@ -19,7 +20,10 @@ struct PanelInfo {
     double frameMilliseconds {};
     std::array<double, gpuPassNames.size()> gpuMilliseconds {};
     glm::ivec2 traceResolution {};
-    double cameraDistance {};
+    double observerRadius {};             // Boyer-Lindquist r of the camera
+    double observerSpeed {};              // relative to the local ZAMO, fraction of c
+    std::optional<double> properTime {};  // of a falling camera since it was dropped, M
+    std::string_view observerNote {};
     std::string_view glRenderer {};
     std::string_view shaderError {};
     std::span<const std::filesystem::path> skyImages {}; // maps found in the asset folder
@@ -31,6 +35,7 @@ struct PanelInfo {
 struct [[nodiscard]] PanelActions {
     bool reloadShaders {};
     bool rescanSkyImages {};
+    bool dropAgain {};
 };
 
 class ControlPanel final {
@@ -38,6 +43,7 @@ public:
     PanelActions draw(SceneSettings& settings, const PanelInfo& info);
 
 private:
+    void drawCamera(SceneSettings& settings, const PanelInfo& info, PanelActions& actions);
     void drawBackground(SceneSettings& settings, const PanelInfo& info, PanelActions& actions);
 
     std::string m_skyPathInput {}; // text field; becomes settings.skyImage on Enter

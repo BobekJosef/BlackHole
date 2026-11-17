@@ -73,16 +73,19 @@ FourVector lower(const Metric& g, const FourVector& v)
     return result;
 }
 
+FourVector raise(const Metric& gInverse, const FourVector& covariant)
+{
+    return lower(gInverse, covariant); // the same contraction, with the inverse metric
+}
+
 double dot(const Metric& g, const FourVector& u, const FourVector& v)
 {
     const FourVector uLower {lower(g, u)};
     return uLower[0] * v[0] + uLower[1] * v[1] + uLower[2] * v[2] + uLower[3] * v[3];
 }
 
-Tetrad zamoTetrad(const ThreeVector& position, const ThreeVector& right, const ThreeVector& up,
-                  const ThreeVector& forward, const double a)
+FourVector zamoVelocity(const ThreeVector& position, const double a)
 {
-    const Metric g {metric(position, a)};
     const Metric gInverse {inverseMetric(position, a)};
 
     // grad t_BL = grad t_KS + 2r/Delta grad r, with grad r from the implicit definition of r:
@@ -107,6 +110,20 @@ Tetrad zamoTetrad(const ThreeVector& position, const ThreeVector& right, const T
     for (double& component : u) {
         component /= std::sqrt(norm);
     }
+    return u;
+}
+
+Tetrad zamoTetrad(const ThreeVector& position, const ThreeVector& right, const ThreeVector& up,
+                  const ThreeVector& forward, const double a)
+{
+    return observerTetrad(position, zamoVelocity(position, a), right, up, forward, a);
+}
+
+Tetrad observerTetrad(const ThreeVector& position, const FourVector& velocity, const ThreeVector& right,
+                      const ThreeVector& up, const ThreeVector& forward, const double a)
+{
+    const Metric g {metric(position, a)};
+    const FourVector& u {velocity};
 
     // Gram-Schmidt in the observer's rest space (g(u, u) = -1, spatial vectors have g = +1).
     Tetrad tetrad {.time = u};

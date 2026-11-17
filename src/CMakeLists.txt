@@ -14,7 +14,8 @@ add_library(bh_physics STATIC
     physics/Disk.cpp
     physics/Geodesic.cpp
     physics/Kerr.cpp
-    physics/KerrSchild.cpp)
+    physics/KerrSchild.cpp
+    physics/Observer.cpp)
 target_include_directories(bh_physics PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
 blackhole_configure_target(bh_physics)
 

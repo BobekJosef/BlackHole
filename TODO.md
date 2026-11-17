@@ -122,9 +122,9 @@ Follow-ups:
 - [x] Limb darkening of the disk atmosphere (electron scattering, `I ∝ 1 + 2.06 μ`, Chandrasekhar 1960),
       flux-conserving; `μ = |p_z| g` in the gas frame (`kerr::diskEmissionCosine`, tested against a
       projection onto the normal made orthogonal to the gas velocity).
-- [x] Outer edge: the disk now reaches 100 M by default (slider to 1000 M, escape radius follows it), so it
+- [x] Outer edge: the disk now reaches 60 M by default (slider to 1000 M, escape radius follows it), so it
       fades out as it cools (`T ∝ r^-3/4`) instead of ending at a visible ~1750 K rim at 20 M.
-- [x] Soft outer edge (*Edge softness*, default the outer half of the radius): the disk thins out, its
+- [x] Soft outer edge (*Edge softness*, default the outer 0.4 of the radius): the disk thins out, its
       face-on opacity tapering from 1 to 0 (a model), seen through slab transfer `1 − e^(−τ/μ)`
       (`kerr::diskEdgeOpacity`, tested). Rays pick up `α·B` at a thin crossing and continue attenuated, so
       the sky and the lensed far side show through; no measurable cost (12.11 vs 12.04 ms).
@@ -192,18 +192,38 @@ Follow-ups:
 - [ ] Einstein ring check against an exact strong-field lens equation (Stage 2 left-over), now that the
       magnification view shows it.
 
-## Stage 6 — Interactivity and performance
+## Stage 6 — Interactivity
 
-- [ ] **Adaptive quality**: lower resolution scale while the camera moves, full resolution when it stops.
-- [ ] **Temporal accumulation**: when nothing changes, jitter sub-pixel ray origins and average frames
-      (progressive anti-aliasing at no interactive cost).
-- [ ] Early ray termination and a tight `r_escape`; skip disk tests above `|z| > disk thickness` cheaply.
-- [ ] Profile work-group size, register pressure (fewer live variables in the integrator), and branch
-      divergence (rays near the photon ring take many more steps than their neighbours).
-- [ ] More camera modes: free-fly (WASD), circular orbit around the hole, free fall into it (timelike
-      geodesic integrated on the CPU in double, via `bh_physics`).
-- [ ] Screenshot (`stb_image_write` PNG, at a chosen resolution offline), save/load settings presets
-      (JSON or ImGui `.ini`), HiDPI-aware ImGui scaling.
+The frame rate is fine (60+ FPS on an iGPU at the defaults), so this stage is about what you can do,
+not speed.
+
+- [x] **Moving observers** (`physics/Observer.hpp`, *Observer* in the panel): the camera frame is built
+      around any 4-velocity (`kerr::observerTetrad`; the ZAMO is one case), so aberration and Doppler
+      shifts of disk and sky come for free: the shaders normalise every ray to the camera's frame.
+  - static (the ZAMO, as before);
+  - orbiting: at the Keplerian angular velocity of its radius (a circular geodesic on the equator, a
+    forced circle off it; none inside the photon orbit), carried around on the shared clock;
+  - free fall: dropped from rest relative to the ZAMO (L_z = 0), a timelike geodesic integrated on the CPU
+    in double in proper time (same Hamilton equations as the rays, H = −1/2), stopping at 1.05 r+
+    because outgoing Kerr–Schild coordinates end at the future horizon. Looks along the
+    Boyer–Lindquist radial direction (the Kerr–Schild position vector is twisted by atan(a/r)).
+  - Tests (`tests/test_observer.cpp`): the Keplerian observer is a circular geodesic, v = 1/√(r − 2) in
+    Schwarzschild, aberration cos θ' = (cos θ + v)/(1 + v cos θ) and the Doppler factor √((1+v)/(1−v)) of
+    the sky ahead to 1e-12, the Schwarzschild infall cycloid, conserved H and L_z in Kerr, and a single
+    huge step stopping outside the horizon (the first version checked the stop only between frames and
+    fell through the horizon at a fast time scale).
+  - One clock for everything that moves (*Time scale* in the Camera section): disk turbulence and the
+    orbiting camera in coordinate time, the falling camera in its proper time.
+- [ ] Screenshot (`stb_image_write` PNG of the rendered frame, optionally at a higher offline resolution).
+- [ ] Save/load settings presets (camera + scene), HiDPI-aware ImGui scaling.
+- [ ] Look around while falling or orbiting (the view is fixed on the hole now), and a free-fall start
+      with angular momentum (plunging spirals).
+- [ ] Auto exposure: a falling camera sees the disk blueshifted to saturation near the horizon.
+- [ ] **Temporal accumulation** (quality, not speed): when nothing changes, jitter sub-pixel ray origins
+      and average frames into a converged, anti-aliased still.
+
+Later, only if the frame rate ever needs it: adaptive resolution while the camera moves; early ray
+termination and a tighter `r_escape`; work-group size, register pressure and divergence profiling.
 
 ## Stage 7 — Quality and tooling
 
