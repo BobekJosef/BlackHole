@@ -106,6 +106,11 @@ Photon cameraRay(const ThreeVector& position, const Tetrad& tetrad, const ThreeV
     return Photon {.position = position, .momentum = {pLower[1], pLower[2], pLower[3]}, .pt = pLower[0]};
 }
 
+double skyRedshift(const Photon& photon)
+{
+    return 1.0 / photon.pt;
+}
+
 TraceResult traceRay(Photon photon, const double a, const TraceSettings& settings)
 {
     const double captureRadius {settings.horizonMargin * outerHorizonRadius(a)};

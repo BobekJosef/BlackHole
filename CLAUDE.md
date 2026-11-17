@@ -6,16 +6,19 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 BlackHole is an interactive, physically based renderer of a rotating (Kerr) black hole with an optional
 accretion disk and a configurable background. The rendering runs on the GPU (OpenGL 4.3 core, GLSL);
-the C++ side owns the window, input, UI and the closed-form physics. `TODO.md` is the roadmap; Stages 0–4
+the C++ side owns the window, input, UI and the closed-form physics. `TODO.md` is the roadmap; Stages 0–5
 are done: rays follow Kerr null geodesics (`trace.comp` + `common/kerr.glsl`); the disk is a
 thin opaque Novikov–Thorne disk from the ISCO whose black-body light is shifted by `g` (Doppler,
-gravitational, frame dragging; `common/disk.glsl`). Next: image backgrounds (Stage 5).
+gravitational, frame dragging; `common/disk.glsl`); escaped rays see stars, a grid or a sky map, filtered
+with a ray differential shared through the work group (`common/sky.glsl`). Next: Stage 6 (interactivity
+and performance).
 
 A frame is three GPU passes (`BlackHoleRenderer`): **trace** (compute, one ray per pixel at
 `renderScale` × window size → HDR radiance image) → **bloom** (compute down/up-sampling chain) →
 **present** (fragment: up-scale, bloom mix, exposure, tone mapping, sRGB). ImGui draws on top.
 
-Stack: C++23, CMake ≥ 3.25, OpenGL 4.3 core, GLFW 3.4, GLAD 2 (vendored), GLM 1.0, Dear ImGui 1.91.
+Stack: C++23, CMake ≥ 3.25, OpenGL 4.3 core, GLFW 3.4, GLAD 2 (vendored), GLM 1.0, Dear ImGui 1.91,
+stb_image.
 macOS is unsupported (OpenGL stops at 4.1 there, and compute shaders need 4.3).
 
 ## Build, run, test
@@ -36,8 +39,12 @@ binary itself in the background (`binary > log 2>&1 & pid=$!` — never `cd dir 
 a wrapper shell, so `kill` leaves the window open), kill it, and confirm with `pgrep -x blackhole`.
 
 - Dependencies come from `cmake/Dependencies.cmake`: GLFW and GLM through `find_package` when an installed
-  package (system or vcpkg) matches, otherwise FetchContent; ImGui always through FetchContent; GLAD is
-  generated code committed in `external/glad` (regeneration command in its README).
+  package (system or vcpkg) matches, otherwise FetchContent; ImGui and stb_image (pinned commit; its
+  implementation unit is generated there, so `STB_IMAGE_IMPLEMENTATION` stays a compile definition)
+  always through FetchContent; GLAD is generated code committed in `external/glad` (regeneration command
+  in its README).
+- Sky maps live in `assets/` (`config::assetDir`), git-ignored except its README; `scripts/download_sky_maps.sh`
+  fetches the default one. Never commit images.
 - Linux needs the X11 headers for GLFW: `libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev`,
   and `libgl-dev`. GLFW's Wayland backend is off by default (`-DGLFW_BUILD_WAYLAND=ON` enables it).
 - Shaders are read at run time from the source tree (`config::shaderDir`, generated into
@@ -57,17 +64,21 @@ src/physics/   bh_physics (no OpenGL, no GLM, double precision, unit-tested):
                Kerr (closed forms, shadow outline), KerrSchild (metric, ZAMO tetrad),
                Geodesic (Hamiltonian equations, RK4 tracer: the CPU reference for the shaders),
                Disk (Page-Thorne flux, temperature profile, redshift g), Blackbody (Planck x CIE -> sRGB)
+src/assets/    bh_assets (no OpenGL, unit-tested): SkyImage (stb_image decoding of equirectangular and
+               cube maps; runs on a worker thread, Application::updateSkyImage)
 src/gfx/       thin OpenGL/GLFW wrappers: Window, GlObject (RAII names), ShaderProgram, GlDebug, GpuTimer;
                ShaderPreprocessor (GLSL #include; no GL, so its own bh_shadertools library, unit-tested)
 src/render/    BlackHoleRenderer (the passes), FrameParams (CPU-side frame description),
                FrameUniforms (std140 mirror of shaders/common/frame.glsl), GpuPass (timed sections)
 src/scene/     OrbitCamera, SceneSettings (what the UI edits)
-src/ui/        ImGuiLayer (context + backends), ControlPanel
+src/ui/        ImGuiLayer (context + backends), ControlPanel (a class: it keeps the path text field)
 src/app/       Application: owns everything, runs the frame loop
 shaders/       main shaders: trace.comp, bloom_*.comp, fullscreen.vert + present.frag
 shaders/common/ shared GLSL headers: frame (UBO), kerr (geodesics), disk (redshift, emission),
-               color (tone mapping, sRGB), sky, random
-tests/         CTest executables (bh_physics, bh_shadertools; no GL context in tests) + GLSL validation
+               color (tone mapping, sRGB), sky (stars, grid, maps; footprint filtering), random
+tests/         CTest executables (bh_physics, bh_shadertools, bh_assets; no GL context in tests) + GLSL validation
+assets/        sky maps, git-ignored (README.md lists sources and licences)
+scripts/       download_sky_maps.sh
 external/glad/ vendored loader
 ```
 
@@ -97,8 +108,23 @@ is converted to GPU quantities in one place (`Application::frameParams`).
   view and the *Analytic shadow edge* overlay.
 - Every formula cites its source next to it (paper and equation number). Prefer a closed form with a test
   against the known limits (`a = 0`, `a = 1`, prograde vs retrograde) over a fitted number.
-- Anything not physical (artistic exposure, fitted colours, procedural stars) is marked as such in a comment,
-  and the physically meaningful path stays the default.
+- Light from the sky reaches the camera shifted by `g = 1/p_t` (`kerr::skyRedshift`). Black-body sources
+  (the procedural stars) take it exactly through the Planck table; RGB images and the grid only get the
+  bolometric `g⁴`.
+- Sky lookups never use screen-space derivatives: lensing makes them meaningless. A pixel's footprint on the
+  sky is the change of the escape direction to its neighbours (`sEscape` in `trace.comp`); filter with it
+  (`textureGrad`, analytic box filters) and take the magnification `μ` from it. Point sources get radiance
+  `F / (sky solid angle of the pixel)`, which is flux-conserving at any magnification.
+- Orientation of sky maps: equirectangular with z up, φ = 0 at the image centre, unmirrored from inside;
+  cube maps through the reflection `xzy` (OpenGL's cube convention is left-handed). Check changes with a
+  labelled test map, not by eye on a star field.
+- Disk turbulence (`diskTurbulence` in `common/disk.glsl`) is a statistical model: it may change the look but
+  must keep the mean flux equal to Page–Thorne (lognormal with the `−σ²Var/2` correction) and must fade
+  below the pixel footprint. `uTime` is coordinate time in M (the animation clock), not seconds. Anything
+  animated must look the same after hours as after seconds: no phase like `t / T(r)` whose spatial
+  gradient grows with `t`; test by starting the clock late (e.g. 20000 M).
+- Anything not physical (artistic exposure, fitted colours, procedural star positions) is marked as such in a
+  comment, and the physically meaningful path stays the default.
 
 ## GPU and GLSL conventions
 
@@ -110,8 +136,13 @@ is converted to GPU quantities in one place (`Application::frameParams`).
   locals `camelCase` as in C++. GLSL `#define` only for include guards.
 - Per-frame scene data goes in the `Frame` UBO (binding 0); a new field changes `common/frame.glsl` and
   `FrameUniforms.hpp` together, with a new `static_assert`. Pass-specific knobs stay plain uniforms.
-- Compute shaders use 8×8 work groups (`workGroupSize` in the renderer) and return early outside the image.
+- Compute shaders use 8×8 work groups (`workGroupSize` in the renderer) and return early outside the image,
+  except `trace.comp`, whose invocations must all reach its `barrier()` (they skip the work instead).
   After a dispatch that writes an image, `glMemoryBarrier` before anything reads it.
+- A NaN or Inf in the radiance image shows up as black squares: the bloom chain spreads it over whole
+  mip blocks. Values above 64512 are Inf in `r11f_g11f_b10f`, so `trace.comp` clamps what it stores; NaNs
+  must be fixed at the source (find them with a temporary atomic-counter SSBO and a scripted camera tour,
+  not by eye). Invert near-singular matrices only with a regularisation that has a physical meaning.
 - HDR images are `r11f_g11f_b10f` (`hdrFormat`): half the bandwidth of `rgba16f`, which halved the bloom
   cost on an iGPU. The image format qualifiers in the shaders must match it.
 - Enum values shared with GLSL (`ToneMapper` ↔ `TONE_MAPPER_*`) have explicit values on both sides.

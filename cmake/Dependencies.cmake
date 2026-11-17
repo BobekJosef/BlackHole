@@ -2,7 +2,8 @@
 #
 # GLFW and GLM are taken from the system / vcpkg when a matching package is found
 # (FetchContent's FIND_PACKAGE_ARGS), otherwise downloaded and built from source.
-# Dear ImGui has no installable CMake package upstream and is always fetched.
+# Dear ImGui has no installable CMake package upstream and is always fetched, as is stb_image
+# (single header, no releases: pinned to a commit).
 # GLAD is generated once and vendored in external/glad.
 
 include(FetchContent)
@@ -41,7 +42,13 @@ FetchContent_Declare(imgui
     GIT_TAG v1.91.9b
     GIT_SHALLOW TRUE)
 
-FetchContent_MakeAvailable(glfw glm imgui)
+# --- stb_image: sky map loading (PNG, JPEG, Radiance .hdr, ...) ----------------
+FetchContent_Declare(stb
+    GIT_REPOSITORY https://github.com/nothings/stb.git
+    GIT_TAG fe3a2a73bfd5f38f8117d223896de72cc2aea30c # master of 2026-09-16 (stb_image 2.30)
+    GIT_SHALLOW FALSE)
+
+FetchContent_MakeAvailable(glfw glm imgui stb)
 
 add_library(imgui STATIC
     ${imgui_SOURCE_DIR}/imgui.cpp
@@ -49,14 +56,25 @@ add_library(imgui STATIC
     ${imgui_SOURCE_DIR}/imgui_draw.cpp
     ${imgui_SOURCE_DIR}/imgui_tables.cpp
     ${imgui_SOURCE_DIR}/imgui_widgets.cpp
+    ${imgui_SOURCE_DIR}/misc/cpp/imgui_stdlib.cpp
     ${imgui_SOURCE_DIR}/backends/imgui_impl_glfw.cpp
     ${imgui_SOURCE_DIR}/backends/imgui_impl_opengl3.cpp)
 target_include_directories(imgui SYSTEM PUBLIC
     ${imgui_SOURCE_DIR}
-    ${imgui_SOURCE_DIR}/backends)
+    ${imgui_SOURCE_DIR}/backends
+    ${imgui_SOURCE_DIR}/misc/cpp)
 target_compile_definitions(imgui PUBLIC IMGUI_DISABLE_OBSOLETE_FUNCTIONS)
 target_link_libraries(imgui PUBLIC glfw PRIVATE ${CMAKE_DL_LIBS})
 add_library(imgui::imgui ALIAS imgui)
 
 # --- GLAD: OpenGL function loader (vendored) ----------------------------------
 add_subdirectory(${PROJECT_SOURCE_DIR}/external/glad ${PROJECT_BINARY_DIR}/external/glad)
+
+# --- stb_image: the implementation compiled once, in its own target -------------
+# The header has no CMake support; the translation unit is generated so that the
+# STB_IMAGE_IMPLEMENTATION switch stays a compile definition, not a #define in our sources.
+file(CONFIGURE OUTPUT "${PROJECT_BINARY_DIR}/generated/stb_image.c" CONTENT "#include <stb_image.h>\n")
+add_library(stb_image STATIC "${PROJECT_BINARY_DIR}/generated/stb_image.c")
+target_include_directories(stb_image SYSTEM PUBLIC "${stb_SOURCE_DIR}")
+target_compile_definitions(stb_image PRIVATE STB_IMAGE_IMPLEMENTATION STBI_NO_GIF STBI_NO_PSD STBI_NO_PIC)
+add_library(stb::image ALIAS stb_image)

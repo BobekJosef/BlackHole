@@ -43,6 +43,13 @@ struct PhotonDerivative {
 [[nodiscard]] Photon cameraRay(const ThreeVector& position, const Tetrad& tetrad, const ThreeVector& direction,
                                double a);
 
+// Shift g = nu_camera / nu_emitted of light that left a source at rest at infinity (a distant star or
+// the sky map) and reached the camera along `photon`. cameraRay normalises the momentum so the camera
+// measures frequency 1, and a static observer at infinity measures p_t, so g = 1 / p_t: a blueshift
+// (g > 1) for a camera deep in the potential, and direction-dependent in Kerr through frame dragging
+// (the ZAMO moves relative to the static frame).
+[[nodiscard]] double skyRedshift(const Photon& photon);
+
 enum class RayFate { CAPTURED, ESCAPED, STEP_LIMIT };
 
 struct TraceSettings {

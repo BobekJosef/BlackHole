@@ -11,7 +11,7 @@ layout(std140, binding = 0) uniform Frame {
     vec4  uCameraPosition;   // xyz, Kerr-Schild, units of M
     vec2  uResolution;       // trace resolution in pixels
     float uTanHalfFov;       // tan(vertical FOV / 2)
-    float uTime;             // seconds
+    float uTime;             // animation clock: coordinate time t in M (drives the disk turbulence)
     float uSpin;             // a = J/M
     float uCaptureRadius;    // Boyer-Lindquist r below which a ray counts as captured (just outside r+)
     float uDiskInnerRadius;  // ISCO
@@ -27,12 +27,25 @@ layout(std140, binding = 0) uniform Frame {
     float uDiskOrbitSign;       // +1 prograde, -1 retrograde gas
     float uBlackbodyLogTMin;    // log10 T range of uBlackbody
     float uBlackbodyLogTMax;
+    uint  uSky;                 // SKY_*
+    mat4  uSkyRotation;         // world direction -> sky map direction (upper 3x3)
+    float uSkyBrightness;       // linear factor on the background
+    float uDiskTurbulence;      // sigma of ln F (0: smooth Novikov-Thorne disk)
+    float uDiskEddySize;        // eddy size / r, ~ disk thickness H / r
+    float uDiskEdgeSoftness;    // fraction of r_out over which the disk thins out to nothing
 };
 
-const uint FLAG_DISK  = 1u << 0;
-const uint FLAG_STARS = 1u << 1;
-const uint FLAG_DOPPLER = 1u << 2;
-const uint FLAG_GRAVITATIONAL_REDSHIFT = 1u << 3;
+const uint FLAG_DISK = 1u << 0;
+const uint FLAG_DOPPLER = 1u << 1;
+const uint FLAG_GRAVITATIONAL_REDSHIFT = 1u << 2;
+const uint FLAG_LIMB_DARKENING = 1u << 3;
+
+// Must match bh::Sky in src/render/FrameParams.hpp.
+const uint SKY_NONE = 0u;
+const uint SKY_STARS = 1u;
+const uint SKY_GRID = 2u;
+const uint SKY_EQUIRECTANGULAR = 3u;
+const uint SKY_CUBEMAP = 4u;
 
 // Must match bh::DebugView in src/render/FrameParams.hpp.
 const uint DEBUG_VIEW_NONE = 0u;
@@ -40,6 +53,7 @@ const uint DEBUG_VIEW_STEPS = 1u;
 const uint DEBUG_VIEW_CONSTRAINT = 2u;
 const uint DEBUG_VIEW_FATE = 3u;
 const uint DEBUG_VIEW_REDSHIFT = 4u;
+const uint DEBUG_VIEW_MAGNIFICATION = 5u;
 
 bool hasFlag(uint flag)
 {

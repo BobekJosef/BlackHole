@@ -17,6 +17,34 @@ namespace {
 constexpr int requiredGlMajor = 4;
 constexpr int requiredGlMinor = 3;
 
+// The monitor with the largest overlap with the window rectangle (GLFW has no call for it), else the primary.
+[[nodiscard]] GLFWmonitor* monitorOf(GLFWwindow* const window)
+{
+    glm::ivec2 position {};
+    glm::ivec2 size {};
+    glfwGetWindowPos(window, &position.x, &position.y);
+    glfwGetWindowSize(window, &size.x, &size.y);
+
+    int count {};
+    GLFWmonitor** const monitors {glfwGetMonitors(&count)};
+    GLFWmonitor* best {glfwGetPrimaryMonitor()};
+    int bestOverlap {0};
+    for (int i {0}; i < count; ++i) {
+        GLFWmonitor* const monitor {monitors[i]};
+        const GLFWvidmode* const mode {glfwGetVideoMode(monitor)};
+        glm::ivec2 origin {};
+        glfwGetMonitorPos(monitor, &origin.x, &origin.y);
+        const glm::ivec2 low {glm::max(position, origin)};
+        const glm::ivec2 high {glm::min(position + size, origin + glm::ivec2 {mode->width, mode->height})};
+        const glm::ivec2 extent {glm::max(high - low, glm::ivec2 {0})};
+        if (extent.x * extent.y > bestOverlap) {
+            bestOverlap = extent.x * extent.y;
+            best = monitor;
+        }
+    }
+    return best;
+}
+
 void onGlfwError(const int code, const char* const description)
 {
     std::cerr << "[GLFW " << code << "] " << description << '\n';
@@ -91,7 +119,32 @@ void Window::swapBuffers()
 
 void Window::setVsync(const bool enabled)
 {
+    m_vsync = enabled;
     glfwSwapInterval(enabled ? 1 : 0);
+}
+
+void Window::setFullscreen(const bool enabled)
+{
+    if (enabled == isFullscreen()) {
+        return;
+    }
+    GLFWwindow* const window {m_window.get()};
+    if (enabled) {
+        glfwGetWindowPos(window, &m_windowedPosition.x, &m_windowedPosition.y);
+        glfwGetWindowSize(window, &m_windowedSize.x, &m_windowedSize.y);
+        GLFWmonitor* const monitor {monitorOf(window)};
+        const GLFWvidmode* const mode {glfwGetVideoMode(monitor)};
+        glfwSetWindowMonitor(window, monitor, 0, 0, mode->width, mode->height, mode->refreshRate);
+    } else {
+        glfwSetWindowMonitor(window, nullptr, m_windowedPosition.x, m_windowedPosition.y, m_windowedSize.x,
+                             m_windowedSize.y, GLFW_DONT_CARE);
+    }
+    setVsync(m_vsync);
+}
+
+bool Window::isFullscreen() const
+{
+    return glfwGetWindowMonitor(m_window.get()) != nullptr;
 }
 
 glm::ivec2 Window::framebufferSize() const

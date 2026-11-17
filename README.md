@@ -4,9 +4,10 @@ Interactive, GPU-accelerated simulation of a rotating (Kerr) black hole, written
 The goal is a physically based image — light bent along null geodesics of the Kerr metric, a thin
 accretion disk with relativistic Doppler and gravitational redshift — that you can fly around in real time.
 
-> **Status: Stage 4 done.** Light follows null geodesics of the Kerr metric, traced on the GPU, and the
+> **Status: Stage 5 done.** Light follows null geodesics of the Kerr metric, traced on the GPU; the
 > accretion disk is a Novikov–Thorne thin disk whose black-body light is Doppler-shifted, beamed and
-> gravitationally redshifted. Next: image backgrounds (Stage 5). See [TODO.md](TODO.md).
+> gravitationally redshifted; the background is a lensed star field, a coordinate grid or any sky map.
+> Next: interactivity and performance (Stage 6). See [TODO.md](TODO.md).
 
 ## Features
 
@@ -15,19 +16,27 @@ accretion disk with relativistic Doppler and gravitational redshift — that you
   photon rings, lensed stars
 - Novikov–Thorne thin accretion disk from the innermost stable circular orbit (ISCO) outwards: Page–Thorne
   temperature profile, black-body colours from the CIE colour matching functions, relativistic Doppler
-  shift and beaming, gravitational redshift (each can be switched off to see its effect)
-- Validation tools: debug views (step count, integration error, ray fate, redshift) and an overlay of the
-  analytic shadow edge
+  shift and beaming, gravitational redshift, limb darkening (each can be switched off to see its effect);
+  it extends far out, fades as it cools, and thins out into transparency at its outer edge. Optional
+  animated turbulence (a statistical model of the magnetorotational instability that keeps the mean
+  Novikov–Thorne flux), sheared by the Keplerian flow
+- Backgrounds: point-source stars that brighten with the lensing magnification (both images of a star
+  behind the hole show), a coordinate grid that makes the lensing map readable, or your own equirectangular
+  or cube-map sky (`.hdr`, PNG, JPEG, …), all filtered with each pixel's footprint on the sky so nothing
+  aliases next to the shadow. The camera's own gravitational blueshift of the sky is included.
+- Validation tools: debug views (step count, integration error, ray fate, redshift, magnification) and an
+  overlay of the analytic shadow edge
 - HDR pipeline: bloom and tone mapping (AgX or ACES)
 - Orbit camera (drag to rotate, scroll to zoom), adjustable field of view, exposure in EV
-- Dear ImGui panel: spin `a/M`, prograde/retrograde disk, disk on/off and size, star background on/off,
-  integrator step size and step limit, render scale (25–100 % of the window resolution), tone mapper, bloom
+- Dear ImGui panel: spin `a/M`, prograde/retrograde disk, disk on/off and size, background choice,
+  brightness and orientation, integrator step size and step limit, render scale (25–100 % of the window resolution), tone mapper, bloom
 - Live readouts of the horizon, ergosphere, photon orbit and ISCO radii for the chosen spin
 - GPU time per pass (trace, bloom, present, UI) in the panel
 - Shader hot reload: edit anything in `shaders/` while the app runs; it recompiles on save, and errors
   show up in the panel with file and line
 
-Planned: HDR image and cubemap backgrounds, adaptive resolution, moving cameras. Details in [TODO.md](TODO.md).
+Planned: adaptive resolution, temporal anti-aliasing, moving cameras, a real star catalogue. Details in
+[TODO.md](TODO.md).
 
 ## Requirements
 
@@ -45,7 +54,7 @@ Planned: HDR image and cubemap backgrounds, adaptive resolution, moving cameras.
 
 Optional: `glslang-tools` (Debian/Ubuntu) adds offline validation of every shader to `ctest`.
 
-GLFW 3.4, GLM 1.0.1 and Dear ImGui 1.91.9b are fetched automatically (an installed GLFW or GLM, e.g. from
+GLFW 3.4, GLM 1.0.1, Dear ImGui 1.91.9b and stb_image are fetched automatically (an installed GLFW or GLM, e.g. from
 vcpkg, is used instead when CMake finds one). The GLAD loader is vendored in `external/glad`.
 
 ## Build and run
@@ -98,19 +107,34 @@ Troubleshooting:
 - On a laptop with two GPUs, run on the discrete one, e.g. `DRI_PRIME=1 ./build/release/src/blackhole`
   (Mesa) or `__NV_PRIME_RENDER_OFFLOAD=1 __GLX_VENDOR_LIBRARY_NAME=nvidia ./build/release/src/blackhole`.
 
+## Sky maps
+
+The *Image map* background needs a map in `assets/` (git-ignored). Fetch the default one with
+
+```sh
+scripts/download_sky_maps.sh   # ESO Milky Way panorama, 8 MB (CC BY 4.0, ESO/S. Brunier)
+```
+
+or drop in your own: an equirectangular image (width = 2 × height; Radiance `.hdr` keeps the stars'
+brightness ratios) or a folder of six cube faces (`px nx py ny pz nz`). Pick it in the panel (*Rescan*
+after adding files), or type any path into the *Path* field. Details in [assets/README.md](assets/README.md).
+
 ## Controls
 
 | Input              | Action                       |
 |--------------------|------------------------------|
-| Left mouse drag    | Orbit around the black hole  |
+| Left drag          | Orbit around the black hole  |
+| Wheel click        | Orbit on/off without holding a button (a left click also ends it) |
 | Scroll             | Zoom in / out                |
+| F11                | Fullscreen on/off            |
 | R                  | Recompile shaders now        |
-| Esc                | Quit                         |
+| Esc                | Leave fullscreen, else quit  |
 
 ## Project layout
 
 ```
 src/physics/   physics in double precision: Kerr closed forms, metric, geodesics, disk, black body (unit-tested)
+src/assets/    sky map loading (unit-tested)
 src/gfx/       window, OpenGL object wrappers, shader programs
 src/render/    the black hole renderer
 src/scene/     camera and user settings
@@ -118,6 +142,8 @@ src/ui/        Dear ImGui layer and control panel
 src/app/       application and frame loop
 shaders/       GLSL (shared headers in shaders/common)
 tests/         unit tests
+assets/        sky maps (downloaded, not committed)
+scripts/       download_sky_maps.sh
 external/glad/ generated OpenGL loader
 ```
 

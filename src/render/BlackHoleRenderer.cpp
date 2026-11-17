@@ -5,13 +5,18 @@
 #include "render/GpuPass.hpp"
 
 #include <algorithm>
+#include <bit>
 #include <cmath>
 #include <cstdint>
+#include <format>
 #include <initializer_list>
+#include <ranges>
 #include <span>
 #include <stdexcept>
+#include <string_view>
 #include <system_error>
 #include <utility>
+#include <variant>
 #include <vector>
 
 namespace bh {
@@ -31,6 +36,11 @@ constexpr GLuint radianceUnit = 0;
 constexpr GLuint bloomUnit = 1;
 constexpr GLuint diskProfileUnit = 2;  // layout(binding = 2) in common/disk.glsl
 constexpr GLuint blackbodyUnit = 3;    // layout(binding = 3)
+constexpr GLuint skyEquirectangularUnit = 4; // layout(binding = 4) in common/sky.glsl
+constexpr GLuint skyCubeUnit = 5;            // layout(binding = 5)
+
+// std140 rounds a block's size up to a multiple of 16 bytes; the buffer must cover all of it.
+constexpr GLsizeiptr frameUniformBufferSize = (sizeof(FrameUniforms) + 15) / 16 * 16;
 
 // Black-body look-up: log10 T from 2.5 (316 K, invisible) to 6 (1e6 K, Rayleigh-Jeans), 1024 samples.
 constexpr float blackbodyLogTMin = 2.5F;
@@ -60,6 +70,27 @@ void setLinearClamp(const GLenum target)
     glTexSubImage1D(GL_TEXTURE_1D, 0, 0, blackbodySamples, GL_RGB, GL_FLOAT, rgb.data());
     setLinearClamp(GL_TEXTURE_1D);
     return texture;
+}
+
+// Largest anisotropy for texture filtering, 1 if unsupported. Core only since OpenGL 4.6; before that
+// the ARB or EXT extension (same enums). Lensing stretches the sky very unevenly, so it matters here.
+[[nodiscard]] float maxAnisotropy()
+{
+    GLint count {};
+    glGetIntegerv(GL_NUM_EXTENSIONS, &count);
+    const bool supported {GLAD_GL_VERSION_4_6 != 0
+                          || std::ranges::any_of(std::views::iota(0, count), [](const GLint i) {
+                                 // glGetStringi returns const GLubyte*, a NUL-terminated character string.
+                                 const std::string_view name {reinterpret_cast<const char*>(
+                                     glGetStringi(GL_EXTENSIONS, static_cast<GLuint>(i)))};
+                                 return name == "GL_ARB_texture_filter_anisotropic"
+                                     || name == "GL_EXT_texture_filter_anisotropic";
+                             })};
+    GLfloat value {1.0F};
+    if (supported) {
+        glGetFloatv(GL_MAX_TEXTURE_MAX_ANISOTROPY, &value);
+    }
+    return value;
 }
 
 // Newest modification time of any file below dir; errors count as "nothing changed".
@@ -108,9 +139,11 @@ BlackHoleRenderer::BlackHoleRenderer(std::filesystem::path shaderDir)
         return std::move(*programs);
     }()}
     , m_blackbodyLut {createBlackbodyLut()}
+    , m_maxAnisotropy {maxAnisotropy()}
 {
     glBindBuffer(GL_UNIFORM_BUFFER, m_frameUniforms.get());
-    glBufferData(GL_UNIFORM_BUFFER, sizeof(FrameUniforms), nullptr, GL_DYNAMIC_DRAW);
+    glBufferData(GL_UNIFORM_BUFFER, frameUniformBufferSize, nullptr, GL_DYNAMIC_DRAW);
+    glEnable(GL_TEXTURE_CUBE_MAP_SEAMLESS); // filter across cube faces (the sky map)
     glBindBufferBase(GL_UNIFORM_BUFFER, frameUniformBinding, m_frameUniforms.get());
 }
 
@@ -172,6 +205,51 @@ void BlackHoleRenderer::setDiskProfile(const std::span<const float> profile)
     glTexSubImage1D(GL_TEXTURE_1D, 0, 0, size, GL_RED, GL_FLOAT, profile.data());
 }
 
+std::expected<void, std::string> BlackHoleRenderer::setSkyImage(const SkyImage& image)
+{
+    const SkyFace& first {image.faces.front()};
+    const bool cube {image.projection == SkyProjection::CUBEMAP};
+    const GLenum target {static_cast<GLenum>(cube ? GL_TEXTURE_CUBE_MAP : GL_TEXTURE_2D)};
+    GLint maxSize {};
+    glGetIntegerv(cube ? GL_MAX_CUBE_MAP_TEXTURE_SIZE : GL_MAX_TEXTURE_SIZE, &maxSize);
+    if (std::max(first.width, first.height) > maxSize) {
+        return std::unexpected {
+            std::format("{}x{} is larger than this GPU's limit of {}", first.width, first.height, maxSize)};
+    }
+
+    // HDR maps as packed floats (half the memory of rgba16f, ample for radiance); 8-bit maps stay
+    // sRGB-encoded and are decoded to linear by the texture unit.
+    const GLenum format {first.isHdr() ? hdrFormat : GL_SRGB8_ALPHA8};
+    const int levels {std::bit_width(static_cast<unsigned>(std::max(first.width, first.height)))};
+    gl::Texture texture {gl::createTexture()};
+    glBindTexture(target, texture.get());
+    glTexStorage2D(target, levels, format, first.width, first.height);
+    for (std::size_t face {0}; face < image.faces.size(); ++face) {
+        const SkyFace& source {image.faces[face]};
+        const GLenum faceTarget {cube ? GL_TEXTURE_CUBE_MAP_POSITIVE_X + static_cast<GLenum>(face) : GL_TEXTURE_2D};
+        if (const auto* const rgb {std::get_if<std::vector<float>>(&source.pixels)}) {
+            glTexSubImage2D(faceTarget, 0, 0, 0, source.width, source.height, GL_RGB, GL_FLOAT, rgb->data());
+        } else {
+            glTexSubImage2D(faceTarget, 0, 0, 0, source.width, source.height, GL_RGBA, GL_UNSIGNED_BYTE,
+                            std::get<std::vector<std::uint8_t>>(source.pixels).data());
+        }
+    }
+    glGenerateMipmap(target);
+    if (glGetError() == GL_OUT_OF_MEMORY) {
+        return std::unexpected {std::format("{}x{}: out of GPU memory", first.width, first.height)};
+    }
+    glTexParameteri(target, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+    glTexParameteri(target, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(target, GL_TEXTURE_WRAP_S, cube ? GL_CLAMP_TO_EDGE : GL_REPEAT); // phi wraps around
+    glTexParameteri(target, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    if (m_maxAnisotropy > 1.0F) {
+        glTexParameterf(target, GL_TEXTURE_MAX_ANISOTROPY, m_maxAnisotropy);
+    }
+    m_skyTexture = std::move(texture);
+    m_skyProjection = image.projection;
+    return {};
+}
+
 void BlackHoleRenderer::resizeTargets(const glm::ivec2 traceSize)
 {
     const auto createTarget = [](const glm::ivec2 size) {
@@ -209,8 +287,8 @@ void BlackHoleRenderer::uploadFrameUniforms(const FrameParams& frame)
         .maxStepFraction = frame.maxStepFraction,
         .escapeRadius = frame.escapeRadius,
         .maxSteps = static_cast<std::uint32_t>(std::max(frame.maxSteps, 1)),
-        .flags = (frame.diskEnabled ? frameFlagDisk : 0U) | (frame.starsEnabled ? frameFlagStars : 0U)
-               | (frame.dopplerShift ? frameFlagDoppler : 0U)
+        .flags = (frame.diskEnabled ? frameFlagDisk : 0U) | (frame.dopplerShift ? frameFlagDoppler : 0U)
+               | (frame.limbDarkening ? frameFlagLimbDarkening : 0U)
                | (frame.gravitationalRedshift ? frameFlagGravitationalRedshift : 0U),
         .debugView = static_cast<std::uint32_t>(std::to_underlying(frame.debugView)),
         .diskPeakTemperature = frame.diskPeakTemperature,
@@ -218,14 +296,34 @@ void BlackHoleRenderer::uploadFrameUniforms(const FrameParams& frame)
         .diskOrbitSign = frame.diskOrbitSign,
         .blackbodyLogTMin = blackbodyLogTMin,
         .blackbodyLogTMax = blackbodyLogTMax,
+        .sky = static_cast<std::uint32_t>(std::to_underlying(availableSky(frame.sky))),
+        .skyRotation = glm::mat4 {frame.skyRotation},
+        .skyBrightness = frame.skyBrightness,
+        .diskTurbulence = frame.diskTurbulence,
+        .diskEddySize = frame.diskEddySize,
+        .diskEdgeSoftness = frame.diskEdgeSoftness,
     };
     glBindBuffer(GL_UNIFORM_BUFFER, m_frameUniforms.get());
     glBufferSubData(GL_UNIFORM_BUFFER, 0, sizeof(uniforms), &uniforms);
 }
 
+Sky BlackHoleRenderer::availableSky(const Sky requested) const
+{
+    if ((requested == Sky::EQUIRECTANGULAR && m_skyProjection != SkyProjection::EQUIRECTANGULAR)
+        || (requested == Sky::CUBEMAP && m_skyProjection != SkyProjection::CUBEMAP)) {
+        return Sky::NONE;
+    }
+    return requested;
+}
+
 void BlackHoleRenderer::trace()
 {
     m_programs.trace.use();
+    if (m_skyProjection) {
+        const bool cube {m_skyProjection == SkyProjection::CUBEMAP};
+        glActiveTexture(GL_TEXTURE0 + (cube ? skyCubeUnit : skyEquirectangularUnit));
+        glBindTexture(cube ? GL_TEXTURE_CUBE_MAP : GL_TEXTURE_2D, m_skyTexture.get());
+    }
     glActiveTexture(GL_TEXTURE0 + diskProfileUnit);
     glBindTexture(GL_TEXTURE_1D, m_diskProfile.get());
     glActiveTexture(GL_TEXTURE0 + blackbodyUnit);

@@ -12,6 +12,7 @@
 #include "physics/KerrSchild.hpp"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <iostream>
 #include <numbers>
@@ -207,6 +208,44 @@ void testCamera()
     expect(cameraRayFate(far, angle(-xiPro * (1.0 - margin)), a) == kerr::RayFate::CAPTURED, "left edge, inside");
 }
 
+// The sky's shift seen by the camera, g = 1 / p_t, against closed forms:
+//  - Schwarzschild: the ZAMO is the static observer, so g = 1 / sqrt(1 - 2/r) in every direction;
+//  - Kerr: the ZAMO measures nu = (E - omega L) / alpha (Bardeen, Press & Teukolsky 1972, eq. 3.8 ff.)
+//    with E = p_t and L = -p_phi = -(x p_y - y p_x) for the past-directed ray, alpha^2 = Sigma Delta / A.
+void testSkyRedshift()
+{
+    const std::array<kerr::ThreeVector, 4> directions {{{0.0, 0.0, 1.0}, {0.6, 0.0, 0.8}, {-0.6, 0.0, 0.8},
+                                                       {0.3, -0.5, std::sqrt(0.66)}}};
+    constexpr double r = 6.0;
+    for (const kerr::ThreeVector& n : directions) {
+        const kerr::ThreeVector position {r, 0.0, 0.0};
+        const kerr::Tetrad tetrad {kerr::zamoTetrad(position, {0.0, 1.0, 0.0}, {0.0, 0.0, 1.0}, {-1.0, 0.0, 0.0}, 0.0)};
+        const kerr::Photon ray {kerr::cameraRay(position, tetrad, n, 0.0)};
+        expectNear(kerr::skyRedshift(ray), 1.0 / std::sqrt(1.0 - 2.0 / r), 1e-12, "a = 0: g = 1/sqrt(1 - 2/r)");
+    }
+
+    constexpr double a = 0.9;
+    const kerr::ThreeVector position {3.0, 2.0, 1.5};
+    const kerr::Tetrad tetrad {kerr::zamoTetrad(position, {0.0, 1.0, 0.0}, {0.0, 0.0, 1.0}, {-1.0, 0.0, 0.0}, a)};
+    const double rKerr {kerr::boyerLindquistRadius(position, a)};
+    const double cosTheta {position[2] / rKerr};
+    const double sigma {rKerr * rKerr + a * a * cosTheta * cosTheta};
+    const double delta {rKerr * rKerr - 2.0 * rKerr + a * a};
+    const double sin2 {1.0 - cosTheta * cosTheta};
+    const double bigA {(rKerr * rKerr + a * a) * (rKerr * rKerr + a * a) - a * a * delta * sin2};
+    const double alpha {std::sqrt(sigma * delta / bigA)};
+    const double omega {kerr::frameDraggingAngularVelocity(rKerr, std::acos(cosTheta), a)};
+    double previous {0.0};
+    for (const kerr::ThreeVector& n : directions) {
+        const kerr::Photon ray {kerr::cameraRay(position, tetrad, n, a)};
+        const double angularMomentum {-(position[0] * ray.momentum[1] - position[1] * ray.momentum[0])};
+        const double energy {ray.pt};
+        expectNear((energy - omega * angularMomentum) / alpha, 1.0, 1e-12, "ZAMO measures frequency 1");
+        expect(kerr::skyRedshift(ray) != previous, "Kerr: g depends on the direction");
+        previous = kerr::skyRedshift(ray);
+    }
+}
+
 // The renderer stops rays at r = max(200, 4 x camera distance) and looks the sky up in the ray's
 // coordinate direction dx/dlambda. Outgoing Kerr-Schild coordinates are built on straight outgoing
 // null lines, so that direction converges quickly: compare it with integrating to r = 1e6.
@@ -262,6 +301,7 @@ int main()
     testSchwarzschild();
     testKerrCapture();
     testCamera();
+    testSkyRedshift();
     testEscapeDirection();
     testShadowOutline();
 

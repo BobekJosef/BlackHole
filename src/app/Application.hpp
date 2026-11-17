@@ -1,16 +1,22 @@
 #pragma once
 
+#include "assets/SkyImage.hpp"
 #include "gfx/GpuTimer.hpp"
 #include "gfx/Window.hpp"
 #include "render/BlackHoleRenderer.hpp"
 #include "scene/OrbitCamera.hpp"
 #include "scene/SceneSettings.hpp"
+#include "ui/ControlPanel.hpp"
 #include "ui/ImGuiLayer.hpp"
 
 #include <glm/glm.hpp>
 
+#include <expected>
+#include <filesystem>
+#include <future>
 #include <optional>
 #include <string>
+#include <vector>
 
 namespace bh {
 
@@ -22,9 +28,11 @@ public:
 
 private:
     void handleInput();
-    [[nodiscard]] FrameParams frameParams(glm::ivec2 framebufferSize, float time) const;
+    [[nodiscard]] FrameParams frameParams(glm::ivec2 framebufferSize) const;
     void drawOverlays() const;
     void updateDiskProfile();
+    // Starts decoding settings.skyImage on a worker thread when it changes, uploads it when done.
+    void updateSkyImage();
     void reloadShaders();
     void pollShaderFiles(double now);
 
@@ -38,13 +46,19 @@ private:
 
     OrbitCamera m_camera {};
     SceneSettings m_settings {};
+    ControlPanel m_panel {};
     std::string m_glRenderer {};
     std::string m_shaderError {};
     glm::dvec2 m_lastCursor {};
     bool m_vsync {true};
+    bool m_fullscreenKeyWasDown {};
+    bool m_escapeLeftFullscreen {}; // Esc still held after leaving fullscreen: do not also quit
     bool m_reloadKeyWasDown {};
+    bool m_middleButtonWasDown {};
+    bool m_orbitLatched {}; // toggled by a wheel click: orbit without holding a button
     double m_smoothedFrameSeconds {1.0 / 60.0};
     double m_nextShaderPoll {};
+    double m_coordinateTime {}; // animation clock in M, advanced at settings.diskTimeScale
 
     // Inputs of the disk temperature profile last uploaded; empty before the first upload.
     struct DiskProfileKey {
@@ -54,6 +68,12 @@ private:
         bool operator==(const DiskProfileKey&) const = default;
     };
     std::optional<DiskProfileKey> m_diskProfileKey {};
+
+    std::vector<std::filesystem::path> m_skyImages {};  // maps in the asset folder
+    std::filesystem::path m_requestedSkyImage {};       // last settings.skyImage a load was started for
+    std::future<std::expected<SkyImage, std::string>> m_skyLoad {}; // in flight while valid()
+    std::string m_skyStatus {};
+    bool m_skyError {};
 };
 
 } // namespace bh

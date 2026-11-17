@@ -13,6 +13,11 @@ target_link_libraries(test_disk PRIVATE bh_physics)
 blackhole_configure_target(test_disk)
 add_test(NAME disk COMMAND test_disk)
 
+add_executable(test_sky_image test_sky_image.cpp)
+target_link_libraries(test_sky_image PRIVATE bh_assets)
+blackhole_configure_target(test_sky_image)
+add_test(NAME sky_image COMMAND test_sky_image)
+
 add_executable(test_shader_preprocessor test_shader_preprocessor.cpp)
 target_link_libraries(test_shader_preprocessor PRIVATE bh_shadertools)
 blackhole_configure_target(test_shader_preprocessor)

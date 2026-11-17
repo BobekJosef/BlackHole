@@ -9,10 +9,10 @@
 
 namespace bh {
 
-inline constexpr std::uint32_t frameFlagDisk = 1U << 0U;  // FLAG_DISK
-inline constexpr std::uint32_t frameFlagStars = 1U << 1U; // FLAG_STARS
-inline constexpr std::uint32_t frameFlagDoppler = 1U << 2U;               // FLAG_DOPPLER
-inline constexpr std::uint32_t frameFlagGravitationalRedshift = 1U << 3U; // FLAG_GRAVITATIONAL_REDSHIFT
+inline constexpr std::uint32_t frameFlagDisk = 1U << 0U;                  // FLAG_DISK
+inline constexpr std::uint32_t frameFlagDoppler = 1U << 1U;               // FLAG_DOPPLER
+inline constexpr std::uint32_t frameFlagGravitationalRedshift = 1U << 2U; // FLAG_GRAVITATIONAL_REDSHIFT
+inline constexpr std::uint32_t frameFlagLimbDarkening = 1U << 3U;         // FLAG_LIMB_DARKENING
 
 inline constexpr unsigned frameUniformBinding = 0;
 
@@ -21,7 +21,7 @@ struct FrameUniforms {
     glm::vec4 cameraPosition {};  // xyz; w unused
     glm::vec2 resolution {};      // trace resolution in pixels
     float tanHalfFov {};
-    float time {};
+    float time {};                // animation clock, coordinate time in M
     float spin {};
     float captureRadius {};
     float diskInnerRadius {};
@@ -37,6 +37,12 @@ struct FrameUniforms {
     float diskOrbitSign {};
     float blackbodyLogTMin {};
     float blackbodyLogTMax {};
+    std::uint32_t sky {};           // SKY_*
+    glm::mat4 skyRotation {1.0F};   // world -> sky map direction (upper 3x3)
+    float skyBrightness {};
+    float diskTurbulence {};
+    float diskEddySize {};
+    float diskEdgeSoftness {};
 };
 
 static_assert(offsetof(FrameUniforms, cameraFrame) == 0);
@@ -59,6 +65,12 @@ static_assert(offsetof(FrameUniforms, diskBrightness) == 140);
 static_assert(offsetof(FrameUniforms, diskOrbitSign) == 144);
 static_assert(offsetof(FrameUniforms, blackbodyLogTMin) == 148);
 static_assert(offsetof(FrameUniforms, blackbodyLogTMax) == 152);
-static_assert(sizeof(FrameUniforms) == 156);
+static_assert(offsetof(FrameUniforms, sky) == 156);
+static_assert(offsetof(FrameUniforms, skyRotation) == 160);
+static_assert(offsetof(FrameUniforms, skyBrightness) == 224);
+static_assert(offsetof(FrameUniforms, diskTurbulence) == 228);
+static_assert(offsetof(FrameUniforms, diskEddySize) == 232);
+static_assert(offsetof(FrameUniforms, diskEdgeSoftness) == 236);
+static_assert(sizeof(FrameUniforms) == 240);
 
 } // namespace bh

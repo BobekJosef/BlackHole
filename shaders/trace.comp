@@ -7,8 +7,12 @@
 // measured by the zero-angular-momentum observer, and is integrated backwards in time (RK4,
 // outgoing Kerr-Schild coordinates; see common/kerr.glsl) until it
 //   - falls into the hole (black),
-//   - crosses the equatorial disk between r_ISCO and r_out (disk emission), or
+//   - crosses the equatorial disk between r_ISCO and r_out (disk emission; where the outer disk thins
+//     out, the ray takes its share of light and goes on, attenuated), or
 //   - escapes beyond uEscapeRadius (sky, looked up in its final direction).
+// The invocations of a work group then exchange their escape directions and disk hits through shared
+// memory: the difference to the neighbouring pixel is the ray differential that filters the sky
+// (common/sky.glsl), measures the lensing magnification, and filters the disk turbulence.
 // The disk is geometrically thin and opaque, so its lensed far side and the higher-order images
 // (the thin rings hugging the shadow) appear without any special treatment. Its light is redshifted
 // by g (Doppler, gravitational, frame dragging; see common/disk.glsl), which needs only the ray's
@@ -21,7 +25,8 @@
 #include "common/kerr.glsl"
 #include "common/sky.glsl"
 
-layout(local_size_x = 8, local_size_y = 8) in;
+layout(local_size_x = 8, local_size_y = 8) in; // workGroupSize in BlackHoleRenderer.cpp
+const int GROUP_SIZE = 8;
 
 layout(r11f_g11f_b10f, binding = 0) uniform writeonly image2D uRadiance;
 
@@ -30,81 +35,240 @@ const int FATE_ESCAPED = 1;
 const int FATE_DISK = 2;
 const int FATE_STEP_LIMIT = 3;
 
+struct Ray {
+    int fate;
+    uint steps;
+    vec3 position;
+    vec3 momentum;         // covariant p_i
+    float pt;              // conserved p_t
+    float angularMomentum; // conserved L_z = x p_y - y p_x
+    // First crossing of the disk (shaded after the barrier, with the neighbours' hits as footprint):
+    int diskLayers;        // number of disk crossings
+    float diskRadius;      // Boyer-Lindquist r
+    vec3 diskHit;          // Kerr-Schild position
+    float diskMomentumZ;   // p_z (emission angle)
+    float diskOpacity;
+    // Light picked up at later crossings (already attenuated), and what still gets through.
+    vec3 laterRadiance;
+    float throughput;
+};
+
+// Per invocation of the group: escape direction (w = 1 if the ray escaped), disk hit (w = 1 if it hit).
+shared vec4 sEscape[GROUP_SIZE][GROUP_SIZE];
+shared vec4 sDiskHit[GROUP_SIZE][GROUP_SIZE];
+
 vec3 heatColor(float t)
 {
     return clamp(vec3(1.5 * t - 0.25, 1.5 - abs(3.0 * t - 1.5), 1.25 - 1.5 * t), 0.0, 1.0);
 }
 
-void main()
+// Unit direction, in the camera frame (right, up, forward), of the ray through a pixel position.
+vec3 pixelDirection(vec2 pixel)
 {
-    ivec2 pixel = ivec2(gl_GlobalInvocationID.xy);
-    if (any(greaterThanEqual(pixel, ivec2(uResolution)))) {
-        return;
-    }
+    vec2 screen = (2.0 * pixel - uResolution) / uResolution.y; // y in [-1, 1]
+    return normalize(vec3(screen * uTanHalfFov, 1.0));
+}
 
-    vec2 screen = (2.0 * (vec2(pixel) + 0.5) - uResolution) / uResolution.y; // y in [-1, 1]
-    vec3 n = normalize(vec3(screen * uTanHalfFov, 1.0));
-    vec4 p4 = uCameraFrame * vec4(-1.0, n);
-    float pt = p4.x;
-    vec3 p = p4.yzw;
-    vec3 x = uCameraPosition.xyz;
-    float angularMomentum = x.x * p.y - x.y * p.x; // L_z, conserved: taken at the start, where it is exact
+Ray traceRay(ivec2 pixel)
+{
+    vec4 p4 = uCameraFrame * vec4(-1.0, pixelDirection(vec2(pixel) + 0.5));
+    Ray ray;
+    ray.fate = FATE_STEP_LIMIT;
+    ray.steps = 0u;
+    ray.position = uCameraPosition.xyz;
+    ray.momentum = p4.yzw;
+    ray.pt = p4.x;
+    // Conserved, so taken at the start, where it is exact.
+    ray.angularMomentum = ray.position.x * ray.momentum.y - ray.position.y * ray.momentum.x;
+    ray.diskLayers = 0;
+    ray.diskRadius = 0.0;
+    ray.diskHit = vec3(0.0);
+    ray.diskMomentumZ = 0.0;
+    ray.diskOpacity = 0.0;
+    ray.laterRadiance = vec3(0.0);
+    ray.throughput = 1.0;
+    float pixelAngle = 2.0 * uTanHalfFov / uResolution.y;
 
-    int fate = FATE_STEP_LIMIT;
-    float diskRadius = 0.0;
-    uint steps = 0u;
+    vec3 x = ray.position;
+    vec3 p = ray.momentum;
     float r = kerrRadius(x);
-    for (; steps < uMaxSteps; ++steps) {
+    for (; ray.steps < uMaxSteps; ++ray.steps) {
         if (r < uCaptureRadius) {
-            fate = FATE_CAPTURED;
+            ray.fate = FATE_CAPTURED;
             break;
         }
         if (r > uEscapeRadius) {
-            fate = FATE_ESCAPED;
+            ray.fate = FATE_ESCAPED;
             break;
         }
         float h = r * min(uStepScale * sqrt(r), uMaxStepFraction);
         vec3 previous = x;
-        rungeKuttaStep(x, p, pt, h);
+        float previousMomentumZ = p.z;
+        rungeKuttaStep(x, p, ray.pt, h);
 
         // Crossing of the equatorial plane: locate it on the chord and test the disk's extent.
         // On z = 0 the Boyer-Lindquist radius is sqrt(x^2 + y^2 - a^2).
         if (hasFlag(FLAG_DISK) && (previous.z > 0.0) != (x.z > 0.0)) {
-            vec3 hit = mix(previous, x, previous.z / (previous.z - x.z));
+            float t = previous.z / (previous.z - x.z);
+            vec3 hit = mix(previous, x, t);
             float rHit = sqrt(max(dot(hit.xy, hit.xy) - uSpin * uSpin, 0.0));
             if (rHit >= uDiskInnerRadius && rHit <= uDiskOuterRadius) {
-                fate = FATE_DISK;
-                diskRadius = rHit;
-                break;
+                float pz = mix(previousMomentumZ, p.z, t);
+                float mu = diskEmissionCosine(rHit, ray.pt, ray.angularMomentum, pz);
+                float opacity = diskOpacity(rHit, mu);
+                if (ray.diskLayers == 0) {
+                    ray.diskRadius = rHit;
+                    ray.diskHit = hit;
+                    ray.diskMomentumZ = pz;
+                    ray.diskOpacity = opacity;
+                } else {
+                    // Seen through the thin outer disk: footprint from the unlensed pixel size at the hit's
+                    // distance, stretched by the grazing angle (weak lensing out there).
+                    vec3 chord = x - previous;
+                    float footprint = pixelAngle * distance(hit, uCameraPosition.xyz) * length(chord)
+                                    / max(abs(chord.z), 0.05 * length(chord));
+                    float g = diskRedshift(rHit, ray.pt, ray.angularMomentum);
+                    float turbulence = diskTurbulence(rHit, atan(hit.y, hit.x), footprint);
+                    ray.laterRadiance += ray.throughput * diskRadiance(rHit, g, mu, turbulence, opacity);
+                }
+                ray.throughput *= 1.0 - opacity;
+                ++ray.diskLayers;
+                if (ray.throughput < 1.0e-3) {
+                    ray.fate = FATE_DISK; // nothing more gets through
+                    break;
+                }
             }
         }
         r = kerrRadius(x);
     }
+    ray.position = x;
+    ray.momentum = p;
+    return ray;
+}
 
-    vec3 radiance = vec3(0.0);
+const int SHARED_ESCAPE = 0;
+const int SHARED_DISK_HIT = 1;
+
+vec4 sharedValue(int which, ivec2 at)
+{
+    return which == SHARED_ESCAPE ? sEscape[at.y][at.x] : sDiskHit[at.y][at.x];
+}
+
+// Change of a shared value (escape direction or disk hit) to the next pixel along `axis`, from the
+// neighbouring invocations: forward difference, else backward (group edge, or the neighbour's ray ended
+// elsewhere). False if neither exists.
+bool neighbourDifferential(int which, ivec2 local, ivec2 axis, vec3 value, out vec3 differential)
+{
+    ivec2 next = local + axis;
+    ivec2 previous = local - axis;
+    differential = vec3(0.0);
+    if (all(lessThan(next, ivec2(GROUP_SIZE))) && sharedValue(which, next).w > 0.5) {
+        differential = sharedValue(which, next).xyz - value;
+        return true;
+    }
+    if (all(greaterThanEqual(previous, ivec2(0))) && sharedValue(which, previous).w > 0.5) {
+        differential = value - sharedValue(which, previous).xyz;
+        return true;
+    }
+    return false;
+}
+
+void main()
+{
+    ivec2 pixel = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 local = ivec2(gl_LocalInvocationID.xy);
+    // No early return: every invocation must reach the barrier below.
+    bool inImage = all(lessThan(pixel, ivec2(uResolution)));
+
+    Ray ray;
+    ray.fate = FATE_STEP_LIMIT;
+    ray.steps = 0u;
+    ray.diskLayers = 0;
+    ray.diskHit = vec3(0.0);
+    if (inImage) {
+        ray = traceRay(pixel);
+    }
+    bool escaped = ray.fate == FATE_ESCAPED;
+    // Far out dx/dlambda points where the light came from.
+    vec3 direction = escaped ? normalize(geodesicDerivative(ray.position, ray.momentum, ray.pt).dx) : vec3(0.0);
+
+    sEscape[local.y][local.x] = vec4(direction, escaped ? 1.0 : 0.0);
+    sDiskHit[local.y][local.x] = vec4(ray.diskHit, ray.diskLayers > 0 ? 1.0 : 0.0);
+    memoryBarrierShared();
+    barrier();
+    if (!inImage) {
+        return;
+    }
+
+    // Sky footprint of this pixel. Without a usable neighbour, fall back to the unlensed pixel size.
+    float pixelAngle = 2.0 * uTanHalfFov / uResolution.y;
+    vec3 jx;
+    vec3 jy;
+    bool hasX = neighbourDifferential(SHARED_ESCAPE, local, ivec2(1, 0), direction, jx);
+    bool hasY = neighbourDifferential(SHARED_ESCAPE, local, ivec2(0, 1), direction, jy);
+    if (!hasX && !hasY) {
+        vec3 helper = abs(direction.z) < 0.9 ? vec3(0.0, 0.0, 1.0) : vec3(1.0, 0.0, 0.0);
+        jx = pixelAngle * normalize(cross(direction, helper));
+    }
+    if (!hasX && hasY) {
+        jx = length(jy) * normalize(cross(jy, direction));
+    }
+    if (!hasY) {
+        jy = length(jx) * normalize(cross(direction, jx));
+    }
+    // Magnification mu = (camera solid angle of the pixel) / (sky solid angle it sees); capped at
+    // 1000 where the footprint degenerates (on the critical curve mu is infinite for a point).
+    vec3 n = pixelDirection(vec2(pixel) + 0.5);
+    float pixelSolidAngle = length(cross(pixelDirection(vec2(pixel) + vec2(1.5, 0.5)) - n,
+                                         pixelDirection(vec2(pixel) + vec2(0.5, 1.5)) - n));
+    float skyArea = max(length(cross(jx, jy)), 1.0e-3 * pixelSolidAngle);
+
+    // Front to back: the first disk crossing, light picked up behind it, then the sky, each attenuated by
+    // what lies in front (laterRadiance and throughput already are).
+    vec3 radiance = ray.laterRadiance;
     float redshift = 1.0;
-    if (fate == FATE_DISK) {
-        redshift = diskRedshift(diskRadius, pt, angularMomentum);
-        radiance = diskRadiance(diskRadius, redshift);
-    } else if (fate == FATE_ESCAPED && hasFlag(FLAG_STARS)) {
-        // Far out dx/dlambda points where the light came from.
-        radiance = starfield(normalize(geodesicDerivative(x, p, pt).dx));
+    if (ray.diskLayers > 0) {
+        redshift = diskRedshift(ray.diskRadius, ray.pt, ray.angularMomentum);
+        float mu = diskEmissionCosine(ray.diskRadius, ray.pt, ray.angularMomentum, ray.diskMomentumZ);
+        // Footprint of the pixel on the disk (M), from the neighbours' hits; 0 (no filtering) if none hit.
+        vec3 dx;
+        vec3 dy;
+        bool hasDx = neighbourDifferential(SHARED_DISK_HIT, local, ivec2(1, 0), ray.diskHit, dx);
+        bool hasDy = neighbourDifferential(SHARED_DISK_HIT, local, ivec2(0, 1), ray.diskHit, dy);
+        float footprint = max(hasDx ? length(dx) : 0.0, hasDy ? length(dy) : 0.0);
+        float turbulence = diskTurbulence(ray.diskRadius, atan(ray.diskHit.y, ray.diskHit.x), footprint);
+        radiance += diskRadiance(ray.diskRadius, redshift, mu, turbulence, ray.diskOpacity);
+    }
+    if (escaped) {
+        // Light from infinity reaches the camera shifted by g = 1 / p_t (kerr::skyRedshift): gravitational
+        // blueshift and frame dragging between infinity and the camera's ZAMO.
+        float skyShift = hasFlag(FLAG_GRAVITATIONAL_REDSHIFT) ? 1.0 / ray.pt : 1.0;
+        radiance += ray.throughput * skyRadiance(direction, jx, jy, skyArea, skyShift);
     }
 
     if (uDebugView == DEBUG_VIEW_STEPS) {
-        radiance = fate == FATE_STEP_LIMIT ? vec3(1.0, 0.0, 1.0) : heatColor(float(steps) / float(uMaxSteps));
+        radiance = ray.fate == FATE_STEP_LIMIT ? vec3(1.0, 0.0, 1.0) : heatColor(float(ray.steps) / float(uMaxSteps));
     } else if (uDebugView == DEBUG_VIEW_CONSTRAINT) {
         // log10 |H| / |p|^2 from 1e-7 (blue) to 1e-1 (red).
-        radiance = heatColor((log(max(constraintError(x, p, pt), 1.0e-12)) / log(10.0) + 7.0) / 6.0);
+        float error = constraintError(ray.position, ray.momentum, ray.pt);
+        radiance = heatColor((log(max(error, 1.0e-12)) / log(10.0) + 7.0) / 6.0);
     } else if (uDebugView == DEBUG_VIEW_REDSHIFT) {
         // Disk only: white at g = 1, red down to g = 1/4, blue up to g = 4 (log scale).
         float t = clamp(log2(redshift) / 2.0, -1.0, 1.0);
         vec3 shifted = t < 0.0 ? mix(vec3(1.0), vec3(0.8, 0.05, 0.0), -t) : mix(vec3(1.0), vec3(0.0, 0.2, 1.0), t);
-        radiance = fate == FATE_DISK ? shifted : vec3(0.02);
+        radiance = ray.diskLayers > 0 ? shifted : vec3(0.02);
+    } else if (uDebugView == DEBUG_VIEW_MAGNIFICATION) {
+        // Sky only: log10 mu from 1/100 (blue) through 1 (green) to 100 (red).
+        float mu = pixelSolidAngle / skyArea;
+        radiance = escaped ? heatColor((log(mu) / log(10.0) + 2.0) / 4.0) : vec3(0.02);
     } else if (uDebugView == DEBUG_VIEW_FATE) {
         const vec3 FATE_COLORS[4] = vec3[4](vec3(0.5, 0.0, 0.0), vec3(0.1, 0.2, 0.7), vec3(1.0, 0.6, 0.1),
                                             vec3(1.0, 0.0, 1.0));
-        radiance = FATE_COLORS[fate];
+        radiance = FATE_COLORS[ray.fate];
     }
-    imageStore(uRadiance, pixel, vec4(radiance, 1.0));
+    // r11f_g11f_b10f has no value above 64512 (the 10-bit blue channel's largest): anything larger is
+    // stored as Inf, which the bloom's Karis average turns into NaN squares. Physically such a pixel is
+    // simply saturated.
+    const float HDR_MAX = 64512.0;
+    imageStore(uRadiance, pixel, vec4(min(radiance, vec3(HDR_MAX)), 1.0));
 }

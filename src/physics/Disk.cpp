@@ -94,4 +94,30 @@ DiskRedshift diskRedshift(const double r, const double a, const Orbit orbit, con
     return DiskRedshift {.gravitational = 1.0 / nuZamo, .doppler = nuZamo / nuEmitter};
 }
 
+double diskEmissionCosine(const double r, const double a, const Orbit orbit, const double pt,
+                          const double angularMomentum, const double pz)
+{
+    return std::abs(pz) * diskRedshift(r, a, orbit, pt, angularMomentum).total();
+}
+
+double diskEdgeOpacity(const double r, const double rOut, const double softness, const double mu)
+{
+    if (r > rOut) {
+        return 0.0;
+    }
+    const double start {rOut * (1.0 - softness)};
+    if (softness <= 0.0 || r <= start) {
+        return 1.0;
+    }
+    const double x {(r - start) / (rOut - start)};
+    const double taper {1.0 - x * x * (3.0 - 2.0 * x)}; // 1 - smoothstep
+    return 1.0 - std::pow(1.0 - taper, 1.0 / std::max(mu, 1.0e-3));
+}
+
+double electronScatteringLimbDarkening(const double mu)
+{
+    constexpr double slope = 2.06;
+    return (1.0 + slope * mu) / (1.0 + 2.0 * slope / 3.0);
+}
+
 } // namespace bh::kerr

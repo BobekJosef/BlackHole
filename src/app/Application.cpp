@@ -11,12 +11,17 @@
 
 #include <glad/gl.h>
 #include <GLFW/glfw3.h>
+#include <glm/gtc/matrix_transform.hpp>
 
 #include <algorithm>
+#include <array>
+#include <chrono>
 #include <cmath>
 #include <filesystem>
-#include <array>
 #include <format>
+#include <optional>
+#include <system_error>
+#include <utility>
 #include <vector>
 
 namespace bh {
@@ -34,7 +39,11 @@ constexpr double captureMargin = 1.01;
 constexpr double minEscapeRadius = 200.0;
 constexpr double escapeRadiusPerCameraDistance = 4.0;
 constexpr std::size_t shadowOutlineSamples = 512;
-constexpr std::size_t diskProfileSamples = 512;
+// The u^2 grid puts ~sqrt(r_peak / r_out) of the samples inside the flux peak: 2048 keep it smooth up to
+// r_out = 1000 M.
+constexpr std::size_t diskProfileSamples = 2048;
+// Rays must reach the whole disk before they count as escaped.
+constexpr double escapeRadiusPerDiskRadius = 1.05;
 
 [[nodiscard]] kerr::ThreeVector toDouble(const glm::vec3& v)
 {
@@ -61,6 +70,40 @@ constexpr std::size_t diskProfileSamples = 512;
     return frame;
 }
 
+// What the panel says about a loaded map.
+[[nodiscard]] std::string describe(const std::filesystem::path& path, const SkyImage& image)
+{
+    const SkyFace& face {image.faces.front()};
+    const bool cube {image.projection == SkyProjection::CUBEMAP};
+    return std::format("{}: {} {}x{}, {}", path.filename().string(), cube ? "cube map" : "equirectangular",
+                       face.width, face.height, face.isHdr() ? "linear float" : "8-bit sRGB");
+}
+
+// A relative path that does not exist from the working directory is looked up in the asset folder.
+[[nodiscard]] std::filesystem::path resolveAssetPath(const std::filesystem::path& path)
+{
+    std::error_code error {};
+    if (path.is_absolute() || std::filesystem::exists(path, error)) {
+        return path;
+    }
+    return std::filesystem::path {config::assetDir} / path;
+}
+
+[[nodiscard]] Sky frameSky(const Background background, const std::optional<SkyProjection> loaded)
+{
+    switch (background) {
+    case Background::NONE: return Sky::NONE;
+    case Background::STARS: return Sky::STARS;
+    case Background::GRID: return Sky::GRID;
+    case Background::IMAGE:
+        if (!loaded) {
+            return Sky::NONE;
+        }
+        return *loaded == SkyProjection::CUBEMAP ? Sky::CUBEMAP : Sky::EQUIRECTANGULAR;
+    }
+    return Sky::NONE;
+}
+
 [[nodiscard]] std::string glString(const GLenum name)
 {
     // glGetString returns const GLubyte*; the bytes are a NUL-terminated character string.
@@ -78,6 +121,7 @@ Application::Application()
     , m_gpuTimer {gpuPassNames.size()}
     , m_glRenderer {glString(GL_RENDERER) + " | OpenGL " + glString(GL_VERSION)}
     , m_lastCursor {m_window.cursorPosition()}
+    , m_skyImages {findSkyImages(std::filesystem::path {config::assetDir})}
 {
 }
 
@@ -95,6 +139,7 @@ void Application::run()
 
         const double now {glfwGetTime()};
         m_smoothedFrameSeconds += frameTimeSmoothing * ((now - lastTime) - m_smoothedFrameSeconds);
+        m_coordinateTime += static_cast<double>(m_settings.diskTimeScale) * (now - lastTime);
         lastTime = now;
 
         handleInput();
@@ -105,25 +150,36 @@ void Application::run()
                         .traceResolution = m_renderer.traceResolution(),
                         .cameraDistance = static_cast<double>(m_camera.distance()),
                         .glRenderer = m_glRenderer,
-                        .shaderError = m_shaderError};
+                        .shaderError = m_shaderError,
+                        .skyImages = m_skyImages,
+                        .skyStatus = m_skyStatus,
+                        .skyError = m_skyError};
         for (std::size_t pass {0}; pass < gpuPassNames.size(); ++pass) {
             info.gpuMilliseconds[pass] = m_gpuTimer.milliseconds(pass);
         }
 
         m_gui.beginFrame();
-        if (drawControlPanel(m_settings, info).reloadShaders) {
+        const PanelActions actions {m_panel.draw(m_settings, info)};
+        if (actions.reloadShaders) {
             reloadShaders();
+        }
+        if (actions.rescanSkyImages) {
+            m_skyImages = findSkyImages(std::filesystem::path {config::assetDir});
         }
         if (m_settings.vsync != m_vsync) {
             m_vsync = m_settings.vsync;
             m_window.setVsync(m_vsync);
         }
+        if (m_settings.fullscreen != m_window.isFullscreen()) {
+            m_window.setFullscreen(m_settings.fullscreen);
+        }
         m_camera.setVerticalFovDegrees(m_settings.fovDegrees);
         drawOverlays();
 
         updateDiskProfile();
+        updateSkyImage();
         m_gpuTimer.beginFrame();
-        m_renderer.draw(frameParams(framebuffer, static_cast<float>(now)), m_gpuTimer);
+        m_renderer.draw(frameParams(framebuffer), m_gpuTimer);
         m_gui.endFrame();
         m_gpuTimer.endSection(index(GpuPass::UI));
         m_window.swapBuffers();
@@ -136,8 +192,21 @@ void Application::handleInput()
     const glm::dvec2 delta {cursor - m_lastCursor};
     m_lastCursor = cursor;
 
+    // A click of the wheel (middle button) latches orbiting on, as if the left button were held, until
+    // the next wheel click or a left click.
+    const bool leftDown {m_window.isMouseButtonDown(GLFW_MOUSE_BUTTON_LEFT)};
+    const bool middleDown {m_window.isMouseButtonDown(GLFW_MOUSE_BUTTON_MIDDLE)};
+    const bool middlePressed {middleDown && !m_middleButtonWasDown};
+    m_middleButtonWasDown = middleDown;
+
     if (!m_gui.wantsMouse()) {
-        if (m_window.isMouseButtonDown(GLFW_MOUSE_BUTTON_LEFT)) {
+        if (middlePressed) {
+            m_orbitLatched = !m_orbitLatched;
+        }
+        if (leftDown) {
+            m_orbitLatched = false;
+        }
+        if (leftDown || m_orbitLatched) {
             m_camera.orbit(glm::vec2 {delta});
         }
         m_camera.zoom(m_window.takeScroll());
@@ -146,9 +215,22 @@ void Application::handleInput()
     }
 
     if (!m_gui.wantsKeyboard()) {
+        // Esc leaves fullscreen first, and quits from a window.
         if (m_window.isKeyDown(GLFW_KEY_ESCAPE)) {
-            m_window.requestClose();
+            if (m_settings.fullscreen) {
+                m_settings.fullscreen = false;
+                m_escapeLeftFullscreen = true;
+            } else if (!m_escapeLeftFullscreen) {
+                m_window.requestClose();
+            }
+        } else {
+            m_escapeLeftFullscreen = false;
         }
+        const bool fullscreenKeyDown {m_window.isKeyDown(GLFW_KEY_F11)};
+        if (fullscreenKeyDown && !m_fullscreenKeyWasDown) {
+            m_settings.fullscreen = !m_settings.fullscreen;
+        }
+        m_fullscreenKeyWasDown = fullscreenKeyDown;
         const bool reloadKeyDown {m_window.isKeyDown(GLFW_KEY_R)};
         if (reloadKeyDown && !m_reloadKeyWasDown) {
             reloadShaders();
@@ -157,10 +239,13 @@ void Application::handleInput()
     }
 }
 
-FrameParams Application::frameParams(const glm::ivec2 framebufferSize, const float time) const
+FrameParams Application::frameParams(const glm::ivec2 framebufferSize) const
 {
     const double a {static_cast<double>(m_settings.spin)};
     const glm::vec3 position {m_camera.position()};
+    const double diskReach {m_settings.diskEnabled
+                                ? escapeRadiusPerDiskRadius * static_cast<double>(m_settings.diskOuterRadius)
+                                : 0.0};
     return FrameParams {
         .outputSize = framebufferSize,
         .renderScale = m_settings.renderScale,
@@ -177,12 +262,21 @@ FrameParams Application::frameParams(const glm::ivec2 framebufferSize, const flo
         .diskOrbitSign = m_settings.diskOrbit == kerr::Orbit::PROGRADE ? 1.0F : -1.0F,
         .dopplerShift = m_settings.dopplerShift,
         .gravitationalRedshift = m_settings.gravitationalRedshift,
-        .starsEnabled = m_settings.starsEnabled,
-        .time = time,
+        .limbDarkening = m_settings.limbDarkening,
+        .diskTurbulence = m_settings.diskTurbulence,
+        .diskEddySize = m_settings.diskEddySize,
+        .diskEdgeSoftness = m_settings.diskEdgeSoftness,
+        .time = static_cast<float>(m_coordinateTime),
+        .sky = frameSky(m_settings.background, m_renderer.skyProjection()),
+        // Yaw about the spin axis, then tilt about x.
+        .skyRotation = glm::mat3 {glm::rotate(glm::rotate(glm::mat4 {1.0F}, glm::radians(m_settings.skyTiltDegrees),
+                                                          glm::vec3 {1.0F, 0.0F, 0.0F}),
+                                              glm::radians(m_settings.skyYawDegrees), glm::vec3 {0.0F, 0.0F, 1.0F})},
+        .skyBrightness = std::exp2(m_settings.skyBrightnessEv),
         .stepScale = m_settings.stepScale,
         .maxStepFraction = m_settings.maxStepFraction,
-        .escapeRadius = static_cast<float>(
-            std::max(minEscapeRadius, escapeRadiusPerCameraDistance * static_cast<double>(m_camera.distance()))),
+        .escapeRadius = static_cast<float>(std::max(
+            {minEscapeRadius, escapeRadiusPerCameraDistance * static_cast<double>(m_camera.distance()), diskReach})),
         .maxSteps = m_settings.maxSteps,
         .debugView = m_settings.debugView,
         .exposure = std::exp2(m_settings.exposureEv),
@@ -205,6 +299,30 @@ void Application::updateDiskProfile()
     std::ranges::transform(profile, samples.begin(), [](const double value) { return static_cast<float>(value); });
     m_renderer.setDiskProfile(samples);
     m_diskProfileKey = key;
+}
+
+void Application::updateSkyImage()
+{
+    if (m_skyLoad.valid()) {
+        if (m_skyLoad.wait_for(std::chrono::seconds {0}) != std::future_status::ready) {
+            return;
+        }
+        auto image {m_skyLoad.get()};
+        const auto uploaded {image ? m_renderer.setSkyImage(*image) : std::unexpected {std::move(image.error())}};
+        m_skyError = !uploaded;
+        m_skyStatus = uploaded ? describe(m_requestedSkyImage, *image) : uploaded.error();
+    }
+    // One load at a time: a choice made meanwhile starts when the current one is done.
+    if (m_settings.background != Background::IMAGE || m_settings.skyImage.empty()
+        || m_settings.skyImage == m_requestedSkyImage) {
+        return;
+    }
+    m_requestedSkyImage = m_settings.skyImage;
+    m_skyStatus = std::format("Loading {}...", m_requestedSkyImage.filename().string());
+    m_skyError = false;
+    m_skyLoad = std::async(std::launch::async, [path = resolveAssetPath(m_requestedSkyImage)] {
+        return loadSkyImage(path);
+    });
 }
 
 void Application::drawOverlays() const

@@ -42,4 +42,25 @@ struct DiskRedshift {
 };
 [[nodiscard]] DiskRedshift diskRedshift(double r, double a, Orbit orbit, double pt, double angularMomentum);
 
+// Cosine of the angle between a ray and the disk normal, measured in the rest frame of the gas (what limb
+// darkening depends on), for a ray with covariant momentum p_z at the disk (same normalisation as above).
+// The unit normal is e_theta, orthogonal to the gas velocity, which has only t and phi components. On the
+// equator of Kerr-Schild Cartesian coordinates d_theta = -r d_z and g_thetatheta = Sigma = r^2, so the
+// photon's normal component is |p_z| and  mu = |p_z| / nu_em = |p_z| g.
+[[nodiscard]] double diskEmissionCosine(double r, double a, Orbit orbit, double pt, double angularMomentum, double pz);
+
+// Limb darkening of an electron-scattering atmosphere (Chandrasekhar 1960, Radiative Transfer, sec. 68 and
+// Table XXIV; the linear fit I(mu) ~ 1 + 2.06 mu as used e.g. by Laor & Netzer 1989), normalised so the
+// emitted flux is unchanged: integral_0^1 L(mu) mu dmu = 1/2, i.e. L = (1 + 2.06 mu) / (1 + 4.12 / 3).
+// Edge-on views of the gas (mu -> 0) are 2.4 times dimmer than face-on ones (mu = 1) at the same T.
+[[nodiscard]] double electronScatteringLimbDarkening(double mu);
+
+// Opacity of one crossing of the disk at Boyer-Lindquist radius r, seen at emission cosine mu (above).
+// A model of the outer edge: instead of ending abruptly at rOut the disk thins out over the last
+// `softness` fraction of its radius, its face-on opacity tapering smoothly (smoothstep) from 1 to 0. That
+// fixes the face-on optical depth, tau = -ln(1 - taper); a slab of optical depth tau seen at cosine mu
+// transmits exp(-tau / mu) = (1 - taper)^(1/mu), so grazing views stay more opaque. Exact radiative
+// transfer for a slab; the taper's shape is the model. 1 inside the taper, 0 beyond rOut.
+[[nodiscard]] double diskEdgeOpacity(double r, double rOut, double softness, double mu);
+
 } // namespace bh::kerr

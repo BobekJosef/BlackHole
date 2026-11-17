@@ -1,5 +1,6 @@
 #pragma once
 
+#include "assets/SkyImage.hpp"
 #include "gfx/GlObject.hpp"
 #include "gfx/GpuTimer.hpp"
 #include "gfx/ShaderProgram.hpp"
@@ -9,6 +10,7 @@
 
 #include <expected>
 #include <filesystem>
+#include <optional>
 #include <span>
 #include <string>
 #include <vector>
@@ -35,6 +37,12 @@ public:
     // (kerr::diskTemperatureProfile). Any number of samples; re-upload whenever spin, orbit or r_out change.
     void setDiskProfile(std::span<const float> profile);
 
+    // Uploads a decoded sky map with a full mipmap chain, replacing the previous one. Fails, keeping the
+    // previous map, if it is larger than the GPU allows.
+    [[nodiscard]] std::expected<void, std::string> setSkyImage(const SkyImage& image);
+    // Projection of the sky map held, if any: what FrameParams::sky may name.
+    [[nodiscard]] std::optional<SkyProjection> skyProjection() const { return m_skyProjection; }
+
     [[nodiscard]] glm::ivec2 traceResolution() const { return m_radiance.size; }
 
 private:
@@ -53,6 +61,8 @@ private:
     [[nodiscard]] std::expected<Programs, std::string> loadPrograms() const;
     void resizeTargets(glm::ivec2 traceSize);
     void uploadFrameUniforms(const FrameParams& frame);
+    // The requested sky, or NONE if it names a map projection the renderer does not hold.
+    [[nodiscard]] Sky availableSky(Sky requested) const;
     void trace();
     void bloom();
     void present(const FrameParams& frame);
@@ -65,6 +75,9 @@ private:
     gl::Texture m_blackbodyLut;            // linear sRGB radiance over log10 T, from bh::blackbodyRgb
     gl::Texture m_diskProfile {};
     int m_diskProfileSize {};
+    gl::Texture m_skyTexture {};               // GL_TEXTURE_2D (equirectangular) or GL_TEXTURE_CUBE_MAP
+    std::optional<SkyProjection> m_skyProjection {};
+    float m_maxAnisotropy {1.0F};              // 1 without anisotropic filtering support
     RenderTarget m_radiance {};
     std::vector<RenderTarget> m_bloomLevels {}; // [0] is half the trace size, each next one half again
 };

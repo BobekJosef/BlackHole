@@ -58,7 +58,7 @@ precision (`tests/test_geodesic.cpp`, against `bh_physics`):
 - [x] Termination: captured below `1.01 r+`, escaped beyond `max(200, 4 × camera distance)`, step limit
       as a safety net (magenta in the debug views).
 - [x] Debug views: step count, constraint error `|H|/|p|²`, fate (captured / sky / disk / step limit).
-- [ ] Einstein ring check with a bright point exactly behind the hole (needs Stage 5 image backgrounds).
+- [ ] Einstein ring check against an exact lens equation (the ring is visible in Stage 5's magnification view).
 
 ## Stage 3 — Kerr geodesics (`0 ≤ a < 1`) ✅
 
@@ -119,27 +119,78 @@ No measurable cost: the shading runs once per disk pixel, after the geodesic (tr
 Follow-ups:
 - [ ] Higher-order images on demand: continue the ray through the disk plane (semi-transparent disk or a
       debug view showing the n = 1, 2 images separately).
-- [ ] Limb darkening of the disk atmosphere (electron scattering, `I ∝ 1 + 2.06 μ`, Chandrasekhar).
-- [ ] Star field: apply the camera's own shift `g = 1/p_t` and use the Planck table instead of the fitted
-      colours (Stage 5).
-- [ ] Optional, clearly marked non-physical: procedural turbulence advected with `Ω(r)`, thick or volumetric
-      disk, animation with `uTime`.
+- [x] Limb darkening of the disk atmosphere (electron scattering, `I ∝ 1 + 2.06 μ`, Chandrasekhar 1960),
+      flux-conserving; `μ = |p_z| g` in the gas frame (`kerr::diskEmissionCosine`, tested against a
+      projection onto the normal made orthogonal to the gas velocity).
+- [x] Outer edge: the disk now reaches 100 M by default (slider to 1000 M, escape radius follows it), so it
+      fades out as it cools (`T ∝ r^-3/4`) instead of ending at a visible ~1750 K rim at 20 M.
+- [x] Soft outer edge (*Edge softness*, default the outer half of the radius): the disk thins out, its
+      face-on opacity tapering from 1 to 0 (a model), seen through slab transfer `1 − e^(−τ/μ)`
+      (`kerr::diskEdgeOpacity`, tested). Rays pick up `α·B` at a thin crossing and continue attenuated, so
+      the sky and the lensed far side show through; no measurable cost (12.11 vs 12.04 ms).
+- [x] Turbulence, a statistical model (marked as such): lognormal flux `F = F_NT exp(σn − σ²Var/2)` (mean kept
+      at Page–Thorne), eddies of the disk thickness `H = h r` stretched 4× along the flow, advected with
+      `Ω(r)` so the Keplerian shear winds them into trailing spirals, living one local orbit (two
+      crossfading generations), animated in coordinate time (*Time scale*, M per second). Octaves smaller
+      than the pixel's footprint on the disk (from the neighbours' hits in shared memory) fade to the mean.
+      Lifetimes are quantised into octave bands `T_b = 2^b M` (picked by the local period, neighbouring
+      bands blended): a per-radius lifetime, phase `t/T(r)`, has a radial phase gradient growing with `t`,
+      and after ~10⁴ M the pattern had shattered into noise with axis-aligned spokes (user report;
+      reproduced by starting the clock at 20000 M). Unit-length gradients and a rotation between octaves
+      remove the lattice-aligned streaks. Cost 1.7 ms (trace 11.9 vs 10.2 ms with turbulence off).
+- [x] Star field: the camera's own shift `g = 1/p_t` and the Planck table instead of the fitted colours (Stage 5).
+- [ ] Light-travel time for the animated turbulence: integrate `dt/dλ = −p_t + f L` along the ray, so the
+      far side of the disk is seen as it was ~2r earlier.
+- [ ] Spectral hardening (colour-correction factor `f_col ≈ 1.7`, Shimura & Takahara 1995) for hot disks.
+- [ ] Finite thickness / volumetric disk (thick flows at high accretion rates).
 
-## Stage 5 — Background (customisable)
+## Stage 5 — Background (customisable) ✅
 
-- [ ] **Equirectangular image** (`.hdr` / `.exr` / `.png` / `.jpg`) and **cubemap** backgrounds, sampled by
-      the escaped ray's final direction. Loader: `stb_image` (FetchContent; `.hdr` included), optionally
-      tinyexr for EXR.
-- [ ] File picker in the panel (ImGui text field + list of files in `assets/`, or portable-file-dialogs),
-      background rotation and brightness controls.
-- [ ] Keep the procedural star field as the zero-dependency default; add a **coordinate grid sphere**
-      background to make the lensing distortion obvious.
-- [ ] **Antialiasing / filtering**: lensing magnifies and minifies the sky enormously near the shadow, so
-      screen-space derivatives are wrong. Use mipmaps with an explicit LOD from ray differentials (trace a
-      neighbouring ray or estimate the ray-bundle spread), or supersample the sky only where the step count
-      is high.
-- [ ] Suggested free sky maps: NASA SVS "Deep Star Maps" (public domain), ESA Gaia sky map (check licence).
-      Do not commit large images: download them into `assets/` (git-ignored) with a script.
+- [x] **Ray differentials from the work group**: after tracing, the invocations of an 8×8 group exchange
+      their escape directions through shared memory; the difference to the neighbouring pixel (forward,
+      else backward, else the unlensed pixel size) is the pixel's footprint on the sky. No extra rays, and
+      no measurable cost: trace 14.05 ms with the sky off, as before.
+- [x] **Magnification** `μ = (pixel solid angle) / (sky solid angle it sees)` from that footprint, shown by
+      the *Magnification (sky)* debug view: the Einstein ring is the red critical curve (μ → ∞), the sky
+      inside it the demagnified secondary image, μ → 1 far away.
+- [x] **Image maps**: equirectangular (`.hdr`, PNG 8/16 bit, JPEG, TGA, BMP; width = 2 × height) and cube
+      maps (a folder of six faces named `px…nz`, `posx…negz` or `right…back`), decoded by stb_image on a
+      worker thread (`bh_assets`, unit-tested), uploaded with mipmaps (`r11f_g11f_b10f` for float data,
+      `SRGB8_ALPHA8` for 8-bit), sampled with `textureGrad` from the footprint plus anisotropic filtering
+      where available. Orientation checked with labelled test maps: equirectangular unmirrored with
+      φ = 0 at the image centre; cube maps need a reflection (`xzy`), not a rotation, because OpenGL's
+      cube-map convention is left-handed.
+- [x] **Procedural stars**, now with physical imaging: point sources whose pixel radiance is
+      `F / (sky solid angle of the pixel)` (so lensing magnification brightens them along the critical
+      curve, and both images of a star behind the hole show), splatted as a 0.5 px Gaussian through the
+      inverse footprint Jacobian (flux-conserving at any magnification), black-body colours from the
+      Planck table at `g T`. Two lattice layers (bright/sparse, faint/dense); a layer whose star spacing is
+      no longer resolved fades into its mean radiance, like a mipmap. Positions and fluxes stay random.
+- [x] **Coordinate grid** background (10° lines in θ and φ, equator red, φ = 0 green), box-filtered with
+      the footprint: shows the lensing map, the Einstein ring and the mirrored secondary image.
+- [x] **The camera's own shift of the sky**: `g = 1/p_t` (`kerr::skyRedshift`, tested: `1/√(1 − 2/r)` for
+      a static Schwarzschild camera, ZAMO frequency `(E − ωL)/α = 1` in Kerr). Exact for the black-body
+      stars; image maps and the grid only get the bolometric `g⁴` (an RGB image has no spectrum).
+- [x] Panel: background (none / stars / grid / image), map list from `assets/` with *Rescan*, a path
+      field, load status, brightness (EV), yaw about the spin axis and tilt.
+- [x] `scripts/download_sky_maps.sh` fetches the ESO Milky Way panorama (CC BY 4.0, ESO/S. Brunier) into
+      the git-ignored `assets/`.
+
+Measured (Release, AMD Renoir iGPU, 1600×900, render scale 0.75, camera at 30 M, disk on): trace 14.05 ms
+with no background, 14.1 ms with the ESO map (one `textureGrad` per sky pixel), 15.5 ms with procedural
+stars (the per-pixel star search, two layers × ~14 lattice cells).
+
+Follow-ups:
+- [ ] OpenEXR (tinyexr): NASA SVS *Deep Star Maps 2020* are EXR. (Its server's certificate chain failed
+      verification from here, so the download script does not include it.)
+- [ ] A real star catalogue (HYG / Gaia bright stars) through the same point-source path, with
+      temperatures from B−V: physical positions and fluxes.
+- [ ] Image maps: optional mapping of the RGB image to a per-pixel colour temperature so the camera shift
+      changes their colour too (approximation, clearly marked).
+- [ ] Star field cost: one 3-D lattice search per layer per pixel; a cube-face 2-D grid would visit fewer
+      cells.
+- [ ] Einstein ring check against an exact strong-field lens equation (Stage 2 left-over), now that the
+      magnification view shows it.
 
 ## Stage 6 — Interactivity and performance
 

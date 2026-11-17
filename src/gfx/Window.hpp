@@ -46,6 +46,10 @@ public:
     void requestClose();
     void swapBuffers();
     void setVsync(bool enabled);
+    // Fullscreen on the monitor that holds most of the window, at that monitor's current video mode (no
+    // mode switch); switching back restores the previous windowed position and size.
+    void setFullscreen(bool enabled);
+    [[nodiscard]] bool isFullscreen() const;
 
     [[nodiscard]] glm::ivec2 framebufferSize() const;
     [[nodiscard]] glm::dvec2 cursorPosition() const;
@@ -62,6 +66,9 @@ private:
 
     std::unique_ptr<GLFWwindow, Destroyer> m_window;
     double m_scroll {};
+    bool m_vsync {true};              // re-applied after a fullscreen switch, which may reset it
+    glm::ivec2 m_windowedPosition {}; // to restore when leaving fullscreen
+    glm::ivec2 m_windowedSize {};
 };
 
 } // namespace bh

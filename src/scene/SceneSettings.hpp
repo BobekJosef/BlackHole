@@ -4,7 +4,12 @@
 #include "physics/Kerr.hpp"
 #include "render/FrameParams.hpp"
 
+#include <filesystem>
+
 namespace bh {
+
+// The background the user picked; an IMAGE is shown once skyImage has loaded.
+enum class Background { NONE, STARS, GRID, IMAGE };
 
 struct SceneSettings {
     // Black hole
@@ -13,13 +18,23 @@ struct SceneSettings {
 
     // Accretion disk (inner edge is the ISCO)
     bool diskEnabled {true};
-    float diskOuterRadius {20.0F};
+    // Far enough out that the disk has cooled below visibility (T ~ r^-3/4): it fades instead of ending.
+    float diskOuterRadius {100.0F};
+    float diskEdgeSoftness {0.5F};       // outer fraction of the radius over which the disk thins out
     float diskPeakTemperature {6500.0F}; // K; scales as (accretion rate / M^2)^(1/4)
     bool dopplerShift {true};            // includes relativistic beaming
     bool gravitationalRedshift {true};   // includes frame dragging
+    bool limbDarkening {true};           // electron-scattering atmosphere
+    float diskTurbulence {0.5F};         // sigma of ln F (MRI-like model); 0 = smooth Novikov-Thorne
+    float diskEddySize {0.05F};          // eddy size / r, ~ the disk's aspect ratio H / r
+    float diskTimeScale {4.0F};          // animation speed, M of coordinate time per second; 0 = frozen
 
     // Background
-    bool starsEnabled {true};
+    Background background {Background::STARS};
+    std::filesystem::path skyImage {};   // equirectangular file or cube-map directory (SkyImage.hpp)
+    float skyBrightnessEv {0.0F};
+    float skyYawDegrees {180.0F};        // about the spin axis; 180 puts a map's centre behind the hole
+    float skyTiltDegrees {0.0F};         // tilts the map's pole: about the world x axis, after the yaw
 
     // Camera
     float fovDegrees {60.0F};
@@ -40,6 +55,7 @@ struct SceneSettings {
 
     // Performance and development
     bool vsync {true};
+    bool fullscreen {false};
     bool autoReloadShaders {true};
 };
 

@@ -14,18 +14,6 @@ float luminance(vec3 color)
     return dot(color, vec3(0.2126, 0.7152, 0.0722)); // Rec.709
 }
 
-// Approximate colour of a black body (Tanner Helland's fit, 1000-40000 K), linear RGB with
-// max component 1. NOT physical; Stage 4 replaces it with a LUT integrated from the CIE 1931
-// colour matching functions.
-vec3 blackbodyColor(float kelvin)
-{
-    float t = clamp(kelvin, 1000.0, 40000.0) / 100.0;
-    float r = t <= 66.0 ? 1.0 : 1.29293618 * pow(t - 60.0, -0.1332047592);
-    float g = t <= 66.0 ? 0.39008158 * log(t) - 0.63184144 : 1.12989086 * pow(t - 60.0, -0.0755148492);
-    float b = t >= 66.0 ? 1.0 : (t <= 19.0 ? 0.0 : 0.54320679 * log(t - 10.0) - 1.19625409);
-    return pow(clamp(vec3(r, g, b), 0.0, 1.0), vec3(2.2)); // the fit is sRGB-encoded; return linear
-}
-
 // ACES filmic curve, Stephen Hill's fit of the RRT + sRGB ODT (BakingLab, MIT).
 vec3 toneMapAces(vec3 color)
 {

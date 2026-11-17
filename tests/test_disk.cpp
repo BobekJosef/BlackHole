@@ -165,8 +165,57 @@ void testRedshift()
             const kerr::DiskRedshift shift {kerr::diskRedshift(r, a, orbit, photon.pt, angularMomentum)};
             expectRelative(shift.total(), 1.0 / contract(u), 1e-10, "g = 1 / (p . u_gas)");
             expectRelative(shift.gravitational, 1.0 / contract(zamo.time), 1e-10, "g_grav = 1 / (p . u_ZAMO)");
+
+            // Emission angle: the unit normal is d_z made orthogonal to u (Gram-Schmidt in the full metric),
+            // mu = |p . n| / |p . u|. Independent of the claims g_zz = 1 and u . d_z = 0 on the equator.
+            kerr::FourVector normal {0.0, 0.0, 0.0, 1.0};
+            const double along {kerr::dot(g, normal, u)};
+            for (std::size_t mu {0}; mu < 4; ++mu) {
+                normal[mu] += along * u[mu]; // u . u = -1
+            }
+            const double length {std::sqrt(kerr::dot(g, normal, normal))};
+            const double cosine {std::abs(contract(normal)) / length / std::abs(contract(u))};
+            expectRelative(kerr::diskEmissionCosine(r, a, orbit, photon.pt, angularMomentum, photon.momentum[2]),
+                           cosine, 1e-10, "mu = |p . n| / |p . u_gas|");
         }
     }
+}
+
+void testLimbDarkening()
+{
+    // Flux conservation: integral_0^1 L(mu) mu dmu = 1/2 (that of an isotropic emitter), by Simpson's rule.
+    constexpr int intervals = 1000;
+    double integral {0.0};
+    for (int i {0}; i <= intervals; ++i) {
+        const double mu {static_cast<double>(i) / intervals};
+        const double weight {i == 0 || i == intervals ? 1.0 : (i % 2 == 1 ? 4.0 : 2.0)};
+        integral += weight * kerr::electronScatteringLimbDarkening(mu) * mu;
+    }
+    expectRelative(integral / (3.0 * intervals), 0.5, 1e-12, "limb darkening conserves the flux");
+    expectRelative(kerr::electronScatteringLimbDarkening(1.0) / kerr::electronScatteringLimbDarkening(0.0), 3.06,
+                   1e-12, "I(1) / I(0) = 3.06");
+}
+
+void testEdgeOpacity()
+{
+    constexpr double rOut = 100.0;
+    constexpr double softness = 0.5;
+    expectRelative(kerr::diskEdgeOpacity(40.0, rOut, softness, 0.7), 1.0, 1e-15, "opaque inside the taper");
+    expect(kerr::diskEdgeOpacity(101.0, rOut, softness, 0.7) == 0.0, "nothing beyond r_out");
+    expect(kerr::diskEdgeOpacity(rOut, rOut, softness, 0.7) == 0.0, "transparent at r_out");
+    // Face-on the opacity is the taper itself: at the middle of the taper zone 1 - smoothstep(1/2) = 1/2.
+    expectRelative(kerr::diskEdgeOpacity(75.0, rOut, softness, 1.0), 0.5, 1e-12, "face-on opacity = taper");
+    // Slab transfer: transmissions multiply along the path, T(mu) = T(1)^(1/mu).
+    const double faceOn {1.0 - kerr::diskEdgeOpacity(80.0, rOut, softness, 1.0)};
+    expectRelative(1.0 - kerr::diskEdgeOpacity(80.0, rOut, softness, 0.25), std::pow(faceOn, 4.0), 1e-12,
+                   "grazing: T = T_face-on^(1/mu)");
+    double previous {1.0};
+    for (double r {50.0}; r <= rOut; r += 1.0) {
+        const double opacity {kerr::diskEdgeOpacity(r, rOut, softness, 0.6)};
+        expect(opacity <= previous, "opacity falls monotonically outwards");
+        previous = opacity;
+    }
+    expect(kerr::diskEdgeOpacity(99.9, rOut, 0.0, 0.6) == 1.0, "softness 0: the old sharp edge");
 }
 
 void testBlackbody()
@@ -192,6 +241,8 @@ int main()
 {
     testNovikovThorne();
     testRedshift();
+    testLimbDarkening();
+    testEdgeOpacity();
     testBlackbody();
 
     if (g_failures != 0) {
