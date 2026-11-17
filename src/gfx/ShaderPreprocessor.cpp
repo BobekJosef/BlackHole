@@ -64,6 +64,9 @@ public:
         int lineNumber {0};
         while (std::getline(lines, line)) {
             ++lineNumber;
+            if (line.ends_with('\r')) {
+                line.pop_back(); // CRLF files (a Windows checkout): the output always has LF
+            }
             const std::string_view trimmed {trimLeft(line)};
             if (trimmed.starts_with(includeExtension)) {
                 m_result.source += '\n'; // keep the line numbering

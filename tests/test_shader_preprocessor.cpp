@@ -1,4 +1,4 @@
-// Checks the GLSL #include preprocessor: inlining, #line bookkeeping, error paths and the
+// Checks the GLSL #include preprocessor: inlining, #line bookkeeping, CRLF input, error paths and the
 // mapping of driver log locations back to file names.
 
 #include "Check.hpp"
@@ -16,7 +16,7 @@ using bh::test::expect;
 void writeFile(const std::filesystem::path& path, const std::string_view contents)
 {
     std::filesystem::create_directories(path.parent_path());
-    std::ofstream {path} << contents;
+    std::ofstream {path, std::ios::binary} << contents; // binary: the line endings are the ones written here
 }
 
 [[nodiscard]] bool contains(const std::string_view text, const std::string_view part)
@@ -36,9 +36,9 @@ TEST_CASE("includes, #line bookkeeping, errors and log mapping")
               "#extension GL_GOOGLE_include_directive : enable\n"
               "#include \"common/a.glsl\"\n"
               "void main() {}\n");
-    writeFile(root / "common/a.glsl",
-              "#include \"b.glsl\"\n"
-              "float a() { return b(); }\n");
+    writeFile(root / "common/a.glsl", // CRLF line endings, as in a Windows checkout
+              "#include \"b.glsl\"\r\n"
+              "float a() { return b(); }\r\n");
     writeFile(root / "common/b.glsl", "float b() { return 1.0; }\n");
 
     const auto result {bh::gl::preprocessShader(root / "main.comp")};
