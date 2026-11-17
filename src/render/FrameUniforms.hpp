@@ -43,6 +43,9 @@ struct FrameUniforms {
     float diskTurbulence {};
     float diskEddySize {};
     float diskEdgeSoftness {};
+
+    // Equal uniforms trace the same image: temporal accumulation continues.
+    bool operator==(const FrameUniforms&) const = default;
 };
 
 static_assert(offsetof(FrameUniforms, cameraFrame) == 0);

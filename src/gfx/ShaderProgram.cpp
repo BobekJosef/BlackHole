@@ -117,6 +117,11 @@ void ShaderProgram::set(const std::string_view name, const int value)
     glProgramUniform1i(m_program.get(), location(name), value);
 }
 
+void ShaderProgram::set(const std::string_view name, const std::uint32_t value)
+{
+    glProgramUniform1ui(m_program.get(), location(name), value);
+}
+
 void ShaderProgram::set(const std::string_view name, const float value)
 {
     glProgramUniform1f(m_program.get(), location(name), value);

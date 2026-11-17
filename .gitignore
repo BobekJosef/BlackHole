@@ -73,3 +73,6 @@ imgui.ini
 # Sky maps: downloaded by scripts/download_sky_maps.sh, too large to commit
 /assets/*
 !/assets/README.md
+
+# Screenshots (F12)
+/screenshots/

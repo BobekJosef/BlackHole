@@ -1,0 +1,10 @@
+# Dropped from rest at 25 M into a spinning hole; it stops just outside the horizon after ~140 M of proper
+# time. "Drop again" in the Camera section restarts the fall. Auto exposure keeps the blueshifted view
+# near the horizon from saturating.
+spin = 0.9
+disk.peak_temperature = 6500
+camera.observer = free_fall
+camera.polar = 75
+camera.distance = 25
+time_scale = 8
+image.auto_exposure = true

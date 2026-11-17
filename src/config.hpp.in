@@ -13,6 +13,12 @@ inline constexpr std::string_view shaderDir {"@BLACKHOLE_SHADER_DIR@"};
 // Default folder of sky maps (git-ignored; scripts/download_sky_maps.sh fills it).
 inline constexpr std::string_view assetDir {"@BLACKHOLE_ASSET_DIR@"};
 
+// Built-in presets, and where the panel saves new ones.
+inline constexpr std::string_view presetDir {"@BLACKHOLE_PRESET_DIR@"};
+
+// Where screenshots go (git-ignored).
+inline constexpr std::string_view screenshotDir {"@BLACKHOLE_SCREENSHOT_DIR@"};
+
 #ifdef NDEBUG
 inline constexpr bool debugBuild = false;
 #else

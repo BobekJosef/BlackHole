@@ -52,6 +52,8 @@ public:
     [[nodiscard]] bool isFullscreen() const;
 
     [[nodiscard]] glm::ivec2 framebufferSize() const;
+    // The monitor's DPI scale as the platform reports it (1 on a standard screen, 2 on a "Retina" one).
+    [[nodiscard]] float contentScale() const;
     [[nodiscard]] glm::dvec2 cursorPosition() const;
     [[nodiscard]] bool isMouseButtonDown(int button) const;
     [[nodiscard]] bool isKeyDown(int key) const;

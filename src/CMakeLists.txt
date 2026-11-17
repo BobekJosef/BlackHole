@@ -1,5 +1,7 @@
 set(BLACKHOLE_SHADER_DIR "${PROJECT_SOURCE_DIR}/shaders")
 set(BLACKHOLE_ASSET_DIR "${PROJECT_SOURCE_DIR}/assets")
+set(BLACKHOLE_SCREENSHOT_DIR "${PROJECT_SOURCE_DIR}/screenshots")
+set(BLACKHOLE_PRESET_DIR "${PROJECT_SOURCE_DIR}/presets")
 configure_file(config.hpp.in "${CMAKE_CURRENT_BINARY_DIR}/generated/blackhole/config.hpp" @ONLY)
 
 # GLSL #include preprocessor: no OpenGL, so it is unit-tested on its own.
@@ -19,12 +21,20 @@ add_library(bh_physics STATIC
 target_include_directories(bh_physics PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
 blackhole_configure_target(bh_physics)
 
-# Sky map decoding (stb_image): no OpenGL, so it runs on a worker thread and in tests.
+# Image files (stb_image, stb_image_write): no OpenGL, so they run on worker threads and in tests.
 add_library(bh_assets STATIC
+    assets/PngFile.cpp
     assets/SkyImage.cpp)
 target_include_directories(bh_assets PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
-target_link_libraries(bh_assets PRIVATE stb::image)
+target_link_libraries(bh_assets PRIVATE stb::image stb::image_write)
 blackhole_configure_target(bh_assets)
+
+# Presets (scene + camera as key = value text): no OpenGL, unit-tested.
+add_library(bh_presets STATIC
+    scene/Preset.cpp)
+target_include_directories(bh_presets PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
+target_link_libraries(bh_presets PUBLIC glm::glm)
+blackhole_configure_target(bh_presets)
 
 add_executable(blackhole
     main.cpp
@@ -51,6 +61,7 @@ target_compile_definitions(blackhole PRIVATE GLFW_INCLUDE_NONE)
 target_link_libraries(blackhole PRIVATE
     bh_assets
     bh_physics
+    bh_presets
     bh_shadertools
     glad::glad
     glfw

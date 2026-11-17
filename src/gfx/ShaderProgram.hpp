@@ -4,6 +4,7 @@
 
 #include <glm/glm.hpp>
 
+#include <cstdint>
 #include <expected>
 #include <filesystem>
 #include <functional>
@@ -32,6 +33,7 @@ public:
 
     void set(std::string_view name, bool value);
     void set(std::string_view name, int value);
+    void set(std::string_view name, std::uint32_t value); // GLSL uint
     void set(std::string_view name, float value);
     void set(std::string_view name, const glm::vec2& value);
     void set(std::string_view name, const glm::vec3& value);

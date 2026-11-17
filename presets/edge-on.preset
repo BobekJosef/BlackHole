@@ -1,0 +1,6 @@
+# A fast-spinning hole almost edge-on: the D-shaped shadow, the lensed far side of the disk arching over
+# it, and the Doppler-bright approaching side on the left.
+spin = 0.9
+disk.peak_temperature = 6500
+camera.polar = 84
+camera.distance = 26

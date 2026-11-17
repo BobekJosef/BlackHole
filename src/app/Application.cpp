@@ -6,6 +6,7 @@
 #include "physics/Kerr.hpp"
 #include "physics/KerrSchild.hpp"
 #include "render/GpuPass.hpp"
+#include "scene/Preset.hpp"
 #include "ui/ControlPanel.hpp"
 #include "ui/ShadowOverlay.hpp"
 
@@ -31,6 +32,7 @@ namespace {
 // Weight of the newest frame in the exponential moving average of the frame time.
 constexpr double frameTimeSmoothing = 0.05;
 constexpr double shaderPollSeconds = 1.0;
+constexpr double doubleClickSeconds = 0.3; // as Dear ImGui's default
 // Rays count as captured just outside the horizon (the backward integration slows down there).
 constexpr double captureMargin = 1.01;
 // Sky lookup radius. In outgoing Kerr-Schild coordinates a ray's coordinate direction is within
@@ -41,6 +43,8 @@ constexpr double escapeRadiusPerCameraDistance = 4.0;
 constexpr std::size_t shadowOutlineSamples = 512;
 // A falling camera stops here: outgoing Kerr-Schild coordinates end at the future horizon.
 constexpr double fallStopHorizonFactor = 1.05;
+// A camera launched faster than escape stops here (the orbit camera's largest distance).
+constexpr double fallEscapeRadius = 1000.0;
 // |z| / r below which the camera counts as in the disk plane (for a note in the panel).
 constexpr double diskPlaneMargin = 0.002;
 // The u^2 grid puts ~sqrt(r_peak / r_out) of the samples inside the flux peak: 2048 keep it smooth up to
@@ -140,6 +144,7 @@ Application::Application()
     , m_glRenderer {glString(GL_RENDERER) + " | OpenGL " + glString(GL_VERSION)}
     , m_lastCursor {m_window.cursorPosition()}
     , m_skyImages {findSkyImages(std::filesystem::path {config::assetDir})}
+    , m_presets {findPresets(std::filesystem::path {config::presetDir})}
 {
 }
 
@@ -158,6 +163,7 @@ void Application::run()
         const double now {glfwGetTime()};
         const double seconds {now - lastTime};
         m_smoothedFrameSeconds += frameTimeSmoothing * (seconds - m_smoothedFrameSeconds);
+        m_frameSeconds = seconds;
         m_coordinateTime += static_cast<double>(m_settings.timeScale) * seconds;
         lastTime = now;
 
@@ -167,28 +173,55 @@ void Application::run()
         const ObserverState observer {observerState()};
         const double a {static_cast<double>(m_settings.spin)};
         const kerr::ThreeVector observerPosition {toDouble(observer.position)};
+        // Guide for the free-fall launch: the prograde circular speed where the next drop starts.
+        const kerr::ThreeVector dropPosition {toDouble(m_camera.position())};
+        const auto circular {kerr::keplerianVelocity(dropPosition, a, kerr::Orbit::PROGRADE)};
+        const std::optional<double> circularSpeed {
+            circular ? std::optional<double> {kerr::speedRelativeToZamo(dropPosition, *circular, a)} : std::nullopt};
         PanelInfo info {.fps = 1.0 / m_smoothedFrameSeconds,
                         .frameMilliseconds = 1000.0 * m_smoothedFrameSeconds,
                         .traceResolution = m_renderer.traceResolution(),
+                        .accumulatedSamples = m_renderer.accumulatedSamples(),
                         .observerRadius = kerr::boyerLindquistRadius(observerPosition, a),
                         .observerSpeed = observer.velocity
                                              ? kerr::speedRelativeToZamo(observerPosition, *observer.velocity, a)
                                              : 0.0,
                         .properTime = m_fall ? std::optional<double> {m_fallProperTime} : std::nullopt,
+                        .circularSpeed = circularSpeed,
                         .observerNote = m_observerNote,
+                        .lookCentered = m_camera.isLookCentered(),
                         .glRenderer = m_glRenderer,
                         .shaderError = m_shaderError,
                         .skyImages = m_skyImages,
                         .skyStatus = m_skyStatus,
-                        .skyError = m_skyError};
+                        .skyError = m_skyError,
+                        .screenshotStatus = m_screenshotStatus,
+                        .screenshotError = m_screenshotError,
+                        .presets = m_presets,
+                        .presetStatus = m_presetStatus,
+                        .presetError = m_presetError};
         for (std::size_t pass {0}; pass < gpuPassNames.size(); ++pass) {
             info.gpuMilliseconds[pass] = m_gpuTimer.milliseconds(pass);
         }
 
+        m_gui.setScale(m_window.contentScale() * m_settings.uiScale);
         m_gui.beginFrame();
         const PanelActions actions {m_panel.draw(m_settings, info)};
         if (actions.reloadShaders) {
             reloadShaders();
+        }
+        m_screenshotRequested = m_screenshotRequested || actions.screenshot;
+        if (actions.recenterLook) {
+            m_camera.recenterLook();
+        }
+        if (actions.loadPreset) {
+            loadPresetFile(*actions.loadPreset);
+        }
+        if (actions.savePreset) {
+            savePresetAs(*actions.savePreset);
+        }
+        if (actions.rescanPresets) {
+            m_presets = findPresets(std::filesystem::path {config::presetDir});
         }
         if (actions.rescanSkyImages) {
             m_skyImages = findSkyImages(std::filesystem::path {config::assetDir});
@@ -206,6 +239,11 @@ void Application::run()
 
         updateDiskProfile();
         updateSkyImage();
+        updateScreenshotStatus();
+        if (m_screenshotRequested) {
+            m_screenshotRequested = false;
+            takeScreenshot(framebuffer);
+        }
         m_gpuTimer.beginFrame();
         m_renderer.draw(frameParams(framebuffer), m_gpuTimer);
         m_gui.endFrame();
@@ -227,7 +265,23 @@ void Application::handleInput()
     const bool middlePressed {middleDown && !m_middleButtonWasDown};
     m_middleButtonWasDown = middleDown;
 
-    // A falling camera goes where gravity takes it.
+    // Right button: look around, in every camera mode; a double click looks back at the hole.
+    const bool rightDown {m_window.isMouseButtonDown(GLFW_MOUSE_BUTTON_RIGHT)};
+    const bool rightPressed {rightDown && !m_rightButtonWasDown};
+    m_rightButtonWasDown = rightDown;
+    if (!m_gui.wantsMouse()) {
+        if (rightPressed) {
+            const double now {glfwGetTime()};
+            if (now - m_lastRightPress < doubleClickSeconds) {
+                m_camera.recenterLook();
+            }
+            m_lastRightPress = now;
+        } else if (rightDown) {
+            m_camera.look(glm::vec2 {delta});
+        }
+    }
+
+    // Orbiting and zooming move the camera; a falling one goes where gravity takes it.
     if (!m_gui.wantsMouse() && m_settings.observer != Observer::FREE_FALL) {
         if (middlePressed) {
             m_orbitLatched = !m_orbitLatched;
@@ -255,11 +309,17 @@ void Application::handleInput()
         } else {
             m_escapeLeftFullscreen = false;
         }
+        const bool screenshotKeyDown {m_window.isKeyDown(GLFW_KEY_F12)};
+        m_screenshotRequested = m_screenshotRequested || (screenshotKeyDown && !m_screenshotKeyWasDown);
+        m_screenshotKeyWasDown = screenshotKeyDown;
         const bool fullscreenKeyDown {m_window.isKeyDown(GLFW_KEY_F11)};
         if (fullscreenKeyDown && !m_fullscreenKeyWasDown) {
             m_settings.fullscreen = !m_settings.fullscreen;
         }
         m_fullscreenKeyWasDown = fullscreenKeyDown;
+        if (m_window.isKeyDown(GLFW_KEY_C)) {
+            m_camera.recenterLook();
+        }
         const bool reloadKeyDown {m_window.isKeyDown(GLFW_KEY_R)};
         if (reloadKeyDown && !m_reloadKeyWasDown) {
             reloadShaders();
@@ -296,7 +356,9 @@ FrameParams Application::frameParams(const glm::ivec2 framebufferSize) const
         .diskTurbulence = m_settings.diskTurbulence,
         .diskEddySize = m_settings.diskEddySize,
         .diskEdgeSoftness = m_settings.diskEdgeSoftness,
-        .time = static_cast<float>(m_coordinateTime),
+        // The clock only drives the turbulence; without it a still view keeps accumulating.
+        .time = m_settings.diskEnabled && m_settings.diskTurbulence > 0.0F ? static_cast<float>(m_coordinateTime)
+                                                                           : 0.0F,
         .sky = frameSky(m_settings.background, m_renderer.skyProjection()),
         // Yaw about the spin axis, then tilt about x.
         .skyRotation = glm::mat3 {glm::rotate(glm::rotate(glm::mat4 {1.0F}, glm::radians(m_settings.skyTiltDegrees),
@@ -309,6 +371,9 @@ FrameParams Application::frameParams(const glm::ivec2 framebufferSize) const
             {minEscapeRadius, escapeRadiusPerCameraDistance * static_cast<double>(glm::length(position)), diskReach})),
         .maxSteps = m_settings.maxSteps,
         .debugView = m_settings.debugView,
+        .accumulate = m_settings.refineStill,
+        .autoExposure = m_settings.autoExposure,
+        .frameSeconds = static_cast<float>(m_frameSeconds),
         .exposure = std::exp2(m_settings.exposureEv),
         .toneMapper = m_settings.toneMapper,
         .bloomEnabled = m_settings.bloomEnabled,
@@ -362,10 +427,11 @@ auto Application::observerState() const -> ObserverState
         const auto& [x, y, z] {m_fall->position};
         const glm::vec3 position {static_cast<float>(x), static_cast<float>(y), static_cast<float>(z)};
         return ObserverState {.position = position,
-                              .basis = OrbitCamera::lookAlong(-radialDirection(m_fall->position, a)),
+                              .basis = m_camera.applyLook(OrbitCamera::lookAlong(-radialDirection(m_fall->position, a))),
                               .velocity = kerr::observerVelocity(*m_fall, a)};
     }
-    ObserverState state {.position = m_camera.position(), .basis = m_camera.basis(), .velocity = std::nullopt};
+    ObserverState state {
+        .position = m_camera.position(), .basis = m_camera.applyLook(m_camera.basis()), .velocity = std::nullopt};
     if (m_settings.observer == Observer::ORBITING) {
         state.velocity = kerr::keplerianVelocity(toDouble(state.position), a, m_settings.diskOrbit);
     }
@@ -409,10 +475,15 @@ void Application::updateObserver(const double seconds, const bool dropAgain)
     }
     case Observer::FREE_FALL: {
         // Dropped from the orbit camera's place; the clock runs in the camera's proper time.
-        if (!m_fall || dropAgain || m_fallSpin != m_settings.spin) {
-            m_fall = kerr::fallingFromRest(toDouble(m_camera.position()), a);
+        if (!m_fall || dropAgain || m_fallSpin != m_settings.spin || m_fallSpeed != m_settings.fallSpeed) {
+            m_fall = kerr::launchedFromZamo(toDouble(m_camera.position()), a, static_cast<double>(m_settings.fallSpeed));
             m_fallProperTime = 0.0;
             m_fallSpin = m_settings.spin;
+            m_fallSpeed = m_settings.fallSpeed;
+        }
+        if (kerr::boyerLindquistRadius(m_fall->position, a) > fallEscapeRadius) {
+            m_observerNote = std::format("Escaped beyond {:.0f} M. Drop again to restart.", fallEscapeRadius);
+            break;
         }
         const double stop {fallStopHorizonFactor * kerr::outerHorizonRadius(a)};
         const kerr::ProperTimeStep step {kerr::advanceProperTime(*m_fall, a, clock, stop)};
@@ -428,10 +499,94 @@ void Application::updateObserver(const double seconds, const bool dropAgain)
     }
 }
 
+void Application::takeScreenshot(const glm::ivec2 windowSize)
+{
+    using enum ScreenshotSize;
+    const glm::ivec2 size {[&] {
+        switch (m_settings.screenshotSize) {
+        case WINDOW: return windowSize;
+        case FULL_HD: return glm::ivec2 {1920, 1080};
+        case QHD: return glm::ivec2 {2560, 1440};
+        case UHD_4K: return glm::ivec2 {3840, 2160};
+        case UHD_8K: return glm::ivec2 {7680, 4320};
+        }
+        return windowSize;
+    }()};
+    FrameParams frame {frameParams(size)};
+    frame.renderScale = 1.0F; // full quality, whatever the interactive setting
+    auto image {m_renderer.renderImage(frame, static_cast<std::uint32_t>(std::max(m_settings.screenshotSamples, 1)))};
+    if (!image) {
+        m_screenshotStatus = image.error();
+        m_screenshotError = true;
+        return;
+    }
+    if (m_screenshotSave.valid()) {
+        static_cast<void>(m_screenshotSave.get()); // one save at a time; rare, and its result is superseded
+    }
+    const std::filesystem::path path {timestampedPath(std::filesystem::path {config::screenshotDir}, "blackhole")};
+    m_screenshotStatus = std::format("Saving {} ({}x{})...", path.filename().string(), size.x, size.y);
+    m_screenshotError = false;
+    m_screenshotSave = std::async(std::launch::async, [path, image = std::move(*image)]
+                                  -> std::expected<std::filesystem::path, std::string> {
+        if (auto written {writePng(path, image)}; !written) {
+            return std::unexpected {std::move(written.error())};
+        }
+        return path;
+    });
+}
+
+void Application::updateScreenshotStatus()
+{
+    if (!m_screenshotSave.valid() || m_screenshotSave.wait_for(std::chrono::seconds {0}) != std::future_status::ready) {
+        return;
+    }
+    const auto saved {m_screenshotSave.get()};
+    m_screenshotError = !saved;
+    m_screenshotStatus = saved ? std::format("Saved {}", saved->string()) : saved.error();
+}
+
+void Application::loadPresetFile(const std::filesystem::path& path)
+{
+    const auto parsed {loadPreset(path, Preset {.settings = m_settings, .camera = m_camera.placement()})};
+    m_presetError = !parsed;
+    if (!parsed) {
+        m_presetStatus = parsed.error();
+        return;
+    }
+    m_settings = parsed->preset.settings;
+    m_camera.place(parsed->preset.camera);
+    m_fall.reset(); // a falling camera starts again from the preset's place
+    m_presetStatus = std::format("Loaded {}", path.stem().string());
+    for (const std::string& warning : parsed->warnings) {
+        m_presetStatus += "\n" + warning;
+    }
+}
+
+void Application::savePresetAs(const std::string_view name)
+{
+    m_presetError = true;
+    if (!isValidPresetName(name)) {
+        m_presetStatus = "A preset name is letters, digits, spaces, '-' and '_'.";
+        return;
+    }
+    const std::filesystem::path path {std::filesystem::path {config::presetDir}
+                                      / (std::string {name} + std::string {presetExtension})};
+    std::error_code error {};
+    const bool replaced {std::filesystem::exists(path, error)};
+    if (const auto saved {savePreset(path, Preset {.settings = m_settings, .camera = m_camera.placement()})}; !saved) {
+        m_presetStatus = saved.error();
+        return;
+    }
+    m_presetError = false;
+    m_presetStatus = std::format("{} {}", replaced ? "Replaced" : "Saved", path.filename().string());
+    m_presets = findPresets(std::filesystem::path {config::presetDir});
+}
+
 void Application::drawOverlays() const
 {
-    // The analytic edge is that of a static observer (the ZAMO); a moving camera sees it aberrated.
-    if (!m_settings.shadowOutline || m_settings.observer != Observer::STATIC) {
+    // The analytic edge is that of a static observer (the ZAMO) looking at the hole; a moving camera sees
+    // it aberrated, and looking away moves it off the centre the overlay assumes.
+    if (!m_settings.shadowOutline || m_settings.observer != Observer::STATIC || !m_camera.isLookCentered()) {
         return;
     }
     const double a {static_cast<double>(m_settings.spin)};

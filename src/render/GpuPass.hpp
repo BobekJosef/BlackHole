@@ -8,9 +8,10 @@
 
 namespace bh {
 
-enum class GpuPass : std::size_t { TRACE, BLOOM, PRESENT, UI };
+// EXPOSURE: the auto-exposure metering (mipmaps + one work group), when it is on.
+enum class GpuPass : std::size_t { TRACE, EXPOSURE, BLOOM, PRESENT, UI };
 
-inline constexpr std::array<std::string_view, 4> gpuPassNames {"Trace", "Bloom", "Present", "UI"};
+inline constexpr std::array<std::string_view, 5> gpuPassNames {"Trace", "Exposure", "Bloom", "Present", "UI"};
 
 [[nodiscard]] constexpr std::size_t index(const GpuPass pass)
 {

@@ -1,0 +1,65 @@
+#version 430 core
+#extension GL_GOOGLE_include_directive : enable
+
+// Auto exposure (a camera's metering, NOT physical): one work group meters the image on a mip level a
+// few dozen texels wide and moves the exposure towards uKey / metered with a time constant, like an eye
+// adapting. The metered value is the luminance-weighted mean sum(L^2) / sum(L): bright regions (the disk,
+// a blueshifted sky) drive it, the black sky and the shadow do not, so a camera falling into a
+// blueshifted view stops down instead of saturating. Result in an SSBO that present.frag reads.
+
+#include "common/color.glsl"
+
+const int GROUP = 16;
+const int SAMPLES_PER_SIDE = 4; // per invocation: a 64 x 64 grid over the image
+
+layout(local_size_x = 16, local_size_y = 16) in; // = GROUP (a constant there needs GLSL 4.40)
+
+layout(binding = 0) uniform sampler2D uImage;   // the radiance about to be presented, with mipmaps
+layout(std430, binding = 1) buffer Exposure {
+    float logExposure;      // log2 of the automatic exposure factor
+    float meteredLuminance;
+};
+
+uniform float uMeterLod;          // mip level sampled
+uniform float uKey;               // metered luminance that maps to exposure 1
+uniform float uDeltaSeconds;
+uniform float uAdaptationSeconds; // time constant of the adaptation
+uniform bool  uReset;             // jump to the target at once
+
+shared vec2 sSums[GROUP * GROUP];
+
+void main()
+{
+    const float GRID = float(GROUP * SAMPLES_PER_SIDE);
+    vec2 sums = vec2(0.0); // (sum L^2, sum L)
+    for (int y = 0; y < SAMPLES_PER_SIDE; ++y) {
+        for (int x = 0; x < SAMPLES_PER_SIDE; ++x) {
+            vec2 cell = vec2(gl_LocalInvocationID.xy) * float(SAMPLES_PER_SIDE) + vec2(x, y);
+            float l = luminance(textureLod(uImage, (cell + 0.5) / GRID, uMeterLod).rgb);
+            sums += vec2(l * l, l);
+        }
+    }
+    uint index = gl_LocalInvocationIndex;
+    sSums[index] = sums;
+    memoryBarrierShared();
+    barrier();
+    for (uint stride = uint(GROUP * GROUP) / 2u; stride > 0u; stride /= 2u) {
+        if (index < stride) {
+            sSums[index] += sSums[index + stride];
+        }
+        memoryBarrierShared();
+        barrier();
+    }
+    if (index != 0u) {
+        return;
+    }
+    vec2 total = sSums[0];
+    if (!(total.y > 0.0)) {
+        return; // a black image says nothing: keep the exposure
+    }
+    float metered = total.x / total.y;
+    float target = clamp(log2(uKey / metered), -20.0, 20.0);
+    float blend = uReset ? 1.0 : 1.0 - exp(-uDeltaSeconds / uAdaptationSeconds);
+    logExposure = mix(logExposure, target, blend);
+    meteredLuminance = metered;
+}

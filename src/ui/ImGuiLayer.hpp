@@ -1,5 +1,7 @@
 #pragma once
 
+#include <imgui.h>
+
 struct GLFWwindow;
 
 namespace bh {
@@ -15,12 +17,23 @@ public:
     ImGuiLayer(ImGuiLayer&&) = delete;
     ImGuiLayer& operator=(ImGuiLayer&&) = delete;
 
+    // Scales the whole UI (sizes, and the font re-rasterised at the new size so it stays sharp), e.g. by the
+    // monitor's content scale. Takes effect at the next beginFrame(); cheap when unchanged.
+    void setScale(float scale);
+
     void beginFrame();
     void endFrame();
 
     // True while ImGui uses the input, so the camera must ignore it.
     [[nodiscard]] bool wantsMouse() const;
     [[nodiscard]] bool wantsKeyboard() const;
+
+private:
+    void applyScale();
+
+    ImGuiStyle m_baseStyle {}; // unscaled, so rescaling never compounds
+    float m_scale {1.0F};
+    float m_appliedScale {0.0F}; // 0: nothing applied yet
 };
 
 } // namespace bh

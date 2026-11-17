@@ -23,8 +23,13 @@ namespace bh::kerr {
 [[nodiscard]] double speedRelativeToZamo(const ThreeVector& position, const FourVector& velocity, double a);
 
 // A freely falling observer, as the state of a timelike geodesic: covariant momentum p_mu = u_mu (unit
-// mass), so H = -1/2 and the affine parameter is proper time. Dropped from rest relative to the ZAMO,
-// i.e. with zero angular momentum: frame dragging alone makes it orbit as it falls.
+// mass), so H = -1/2 and the affine parameter is proper time. Launched from the local ZAMO with speed
+// `sidewaysSpeed` (fraction of c, |v| < 1; + in the hole's sense of rotation) along the unit phi direction
+// e_phi = d_phi / |d_phi|, which is orthogonal to the ZAMO (it has no angular momentum):
+// u = gamma (u_ZAMO + v e_phi). v = 0 drops it from rest with zero angular momentum (frame dragging alone
+// then makes it orbit as it falls); v = the local circular speed puts it on a circular orbit; in between
+// it plunges in a spiral. On the spin axis, where phi is undefined, v is ignored.
+[[nodiscard]] Photon launchedFromZamo(const ThreeVector& position, double a, double sidewaysSpeed);
 [[nodiscard]] Photon fallingFromRest(const ThreeVector& position, double a);
 
 // Advances a timelike geodesic by proper time tau with RK4 sub-steps small against the local dynamical

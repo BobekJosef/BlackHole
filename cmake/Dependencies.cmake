@@ -42,7 +42,7 @@ FetchContent_Declare(imgui
     GIT_TAG v1.91.9b
     GIT_SHALLOW TRUE)
 
-# --- stb_image: sky map loading (PNG, JPEG, Radiance .hdr, ...) ----------------
+# --- stb_image / stb_image_write: sky maps in, screenshots out --------------------
 FetchContent_Declare(stb
     GIT_REPOSITORY https://github.com/nothings/stb.git
     GIT_TAG fe3a2a73bfd5f38f8117d223896de72cc2aea30c # master of 2026-09-16 (stb_image 2.30)
@@ -78,3 +78,9 @@ add_library(stb_image STATIC "${PROJECT_BINARY_DIR}/generated/stb_image.c")
 target_include_directories(stb_image SYSTEM PUBLIC "${stb_SOURCE_DIR}")
 target_compile_definitions(stb_image PRIVATE STB_IMAGE_IMPLEMENTATION STBI_NO_GIF STBI_NO_PSD STBI_NO_PIC)
 add_library(stb::image ALIAS stb_image)
+
+file(CONFIGURE OUTPUT "${PROJECT_BINARY_DIR}/generated/stb_image_write.c" CONTENT "#include <stb_image_write.h>\n")
+add_library(stb_image_write STATIC "${PROJECT_BINARY_DIR}/generated/stb_image_write.c")
+target_include_directories(stb_image_write SYSTEM PUBLIC "${stb_SOURCE_DIR}")
+target_compile_definitions(stb_image_write PRIVATE STB_IMAGE_WRITE_IMPLEMENTATION)
+add_library(stb::image_write ALIAS stb_image_write)

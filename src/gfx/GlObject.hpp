@@ -62,6 +62,9 @@ struct BufferDeleter {
 struct QueryDeleter {
     void operator()(const GLuint name) const noexcept { glDeleteQueries(1, &name); }
 };
+struct FramebufferDeleter {
+    void operator()(const GLuint name) const noexcept { glDeleteFramebuffers(1, &name); }
+};
 
 } // namespace detail
 
@@ -71,6 +74,7 @@ using VertexArray = Object<detail::VertexArrayDeleter>;
 using Texture = Object<detail::TextureDeleter>;
 using Buffer = Object<detail::BufferDeleter>;
 using Query = Object<detail::QueryDeleter>;
+using Framebuffer = Object<detail::FramebufferDeleter>;
 
 [[nodiscard]] inline VertexArray createVertexArray()
 {
@@ -91,6 +95,13 @@ using Query = Object<detail::QueryDeleter>;
     GLuint name {};
     glGenTextures(1, &name);
     return Texture {name};
+}
+
+[[nodiscard]] inline Framebuffer createFramebuffer()
+{
+    GLuint name {};
+    glGenFramebuffers(1, &name);
+    return Framebuffer {name};
 }
 
 [[nodiscard]] inline Query createQuery()

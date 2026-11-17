@@ -26,9 +26,11 @@ accretion disk with relativistic Doppler and gravitational redshift — that you
   aliases next to the shadow. The camera's own gravitational blueshift of the sky is included.
 - Validation tools: debug views (step count, integration error, ray fate, redshift, magnification) and an
   overlay of the analytic shadow edge
-- HDR pipeline: bloom and tone mapping (AgX or ACES)
+- HDR pipeline: bloom and tone mapping (AgX or ACES), optional auto exposure; a still view refines into
+  an anti-aliased image (jittered frames averaged), then the GPU idles
 - Observers: a static camera (the zero-angular-momentum observer), one orbiting at the Keplerian speed, or
-  one falling freely into the hole, each seeing the aberration and Doppler shift its motion causes
+  one falling freely into the hole (dropped, or launched sideways into a plunging spiral), each seeing the
+  aberration and Doppler shift its motion causes; look around in any of them
 - Orbit camera (drag to rotate, scroll to zoom), adjustable field of view, exposure in EV
 - Dear ImGui panel: spin `a/M`, prograde/retrograde disk, disk on/off and size, background choice,
   brightness and orientation, integrator step size and step limit, render scale (25–100 % of the window resolution), tone mapper, bloom
@@ -121,14 +123,33 @@ or drop in your own: an equirectangular image (width = 2 × height; Radiance `.h
 brightness ratios) or a folder of six cube faces (`px nx py ny pz nz`). Pick it in the panel (*Rescan*
 after adding files), or type any path into the *Path* field. Details in [assets/README.md](assets/README.md).
 
+## Presets and screenshots
+
+The panel's *Presets* section loads a scene and camera from `presets/` (edge-on, face-on, lensing grid,
+Milky Way, orbiting, plunge) and saves the current one under a name. A preset is a short text file:
+
+```ini
+# keys left out take their default values
+spin = 0.9
+disk.peak_temperature = 6500
+camera.polar = 84
+camera.distance = 26
+```
+
+**F12** (or *Save PNG* in the panel) saves a screenshot without the panel into `screenshots/`, rendered
+again at full quality: at the window's size, or at a fixed size up to 7680 × 4320.
+
 ## Controls
 
 | Input              | Action                       |
 |--------------------|------------------------------|
 | Left drag          | Orbit around the black hole  |
+| Right drag         | Look around (every camera mode) |
+| Right double click, C | Look back at the hole      |
 | Wheel click        | Orbit on/off without holding a button (a left click also ends it) |
 | Scroll             | Zoom in / out                |
 | F11                | Fullscreen on/off            |
+| F12                | Screenshot (PNG)             |
 | R                  | Recompile shaders now        |
 | Esc                | Leave fullscreen, else quit  |
 
@@ -139,12 +160,14 @@ src/physics/   physics in double precision: Kerr closed forms, metric, geodesics
 src/assets/    sky map loading (unit-tested)
 src/gfx/       window, OpenGL object wrappers, shader programs
 src/render/    the black hole renderer
-src/scene/     camera and user settings
+src/scene/     camera, user settings, presets
 src/ui/        Dear ImGui layer and control panel
 src/app/       application and frame loop
 shaders/       GLSL (shared headers in shaders/common)
 tests/         unit tests
 assets/        sky maps (downloaded, not committed)
+presets/       scene presets (key = value text)
+screenshots/   F12 output (not committed)
 scripts/       download_sky_maps.sh
 external/glad/ generated OpenGL loader
 ```

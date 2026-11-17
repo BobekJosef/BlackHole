@@ -53,8 +53,13 @@ struct FrameParams {
     int maxSteps {};
     DebugView debugView {DebugView::NONE};
 
+    // Temporal accumulation: average jittered frames while the trace inputs do not change
+    bool accumulate {true};
+
     // Post-processing
-    float exposure {1.0F}; // linear factor
+    bool autoExposure {};
+    float frameSeconds {}; // wall time since the last frame (exposure adaptation); 0 freezes it
+    float exposure {1.0F}; // linear factor (on top of the automatic one when that is on)
     ToneMapper toneMapper {ToneMapper::AGX};
     bool bloomEnabled {};
     float bloomStrength {};

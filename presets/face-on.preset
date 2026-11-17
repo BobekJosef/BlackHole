@@ -1,0 +1,6 @@
+# Looking down the spin axis: a nearly circular shadow ringed by the photon ring, the disk's turbulence
+# sheared into trailing spirals.
+spin = 0.5
+disk.turbulence = 0.7
+camera.polar = 12
+camera.distance = 32

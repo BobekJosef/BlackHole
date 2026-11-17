@@ -5,6 +5,7 @@
 #include <glad/gl.h>
 #include <GLFW/glfw3.h>
 
+#include <algorithm>
 #include <format>
 #include <iostream>
 #include <stdexcept>
@@ -152,6 +153,13 @@ glm::ivec2 Window::framebufferSize() const
     glm::ivec2 size {};
     glfwGetFramebufferSize(m_window.get(), &size.x, &size.y);
     return size;
+}
+
+float Window::contentScale() const
+{
+    glm::vec2 scale {1.0F};
+    glfwGetWindowContentScale(m_window.get(), &scale.x, &scale.y);
+    return std::max(scale.x, scale.y);
 }
 
 glm::dvec2 Window::cursorPosition() const

@@ -179,6 +179,31 @@ void testFreeFall()
     expectNear(angularMomentum(state), 0.0, 1e-7, "L_z conserved");
     expectNear(kerr::hamiltonian(state, a), -0.5, 1e-7, "H = -1/2 conserved");
 
+    // Launched sideways at the local circular speed it orbits instead of falling: the launch and the
+    // Keplerian observer agree.
+    for (const kerr::Orbit orbit : {kerr::Orbit::PROGRADE, kerr::Orbit::RETROGRADE}) {
+        const kerr::ThreeVector at {equatorial(9.0, a)};
+        const kerr::FourVector circular {kerr::keplerianVelocity(at, a, orbit).value()};
+        const double speed {kerr::speedRelativeToZamo(at, circular, a)};
+        const double signedSpeed {orbit == kerr::Orbit::PROGRADE ? speed : -speed};
+        const kerr::Photon launched {kerr::launchedFromZamo(at, a, signedSpeed)};
+        const kerr::FourVector u {kerr::observerVelocity(launched, a)};
+        for (std::size_t mu {0}; mu < 4; ++mu) {
+            expectNear(u[mu], circular[mu], 1e-12, "launch at the circular speed = Keplerian observer");
+        }
+        expectNear(kerr::hamiltonian(launched, a), -0.5, 1e-12, "unit 4-velocity");
+        const kerr::Photon later {kerr::advanceProperTime(launched, a, 200.0, 0.0).state};
+        expectNear(kerr::boyerLindquistRadius(later.position, a), 9.0, 1e-6, "and stays on its circle");
+    }
+    // Slower than circular (L_z ~ 1.9, below what a prograde orbit at a = 0.9 needs to avoid capture): it
+    // spirals in, keeping its angular momentum (u_phi > 0: prograde).
+    const kerr::Photon spiral {kerr::launchedFromZamo(equatorial(9.0, a), a, 0.2)};
+    const double launchedL {angularMomentum(spiral)};
+    expect(launchedL > 0.0, "prograde launch has u_phi > 0");
+    const kerr::ProperTimeStep plunge {kerr::advanceProperTime(spiral, a, 1.0e4, 1.2 * kerr::outerHorizonRadius(a))};
+    expect(kerr::boyerLindquistRadius(plunge.state.position, a) <= 1.2 * kerr::outerHorizonRadius(a),
+           "plunges to the horizon");
+    expectNear(angularMomentum(plunge.state), launchedL, 1e-7, "L_z conserved along the spiral");
     // One step far longer than the fall stops at the stop radius, outside the horizon, without blowing up
     // (the app advances a whole frame at once; checking only between frames let the camera fall through
     // the horizon, where these coordinates are singular).

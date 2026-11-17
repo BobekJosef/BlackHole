@@ -10,6 +10,8 @@ namespace {
 // RK4 sub-step: a small fraction of the dynamical time r^1.5, shrunk near the horizon.
 constexpr double stepPerDynamicalTime = 0.005;
 constexpr double minHorizonFactor = 0.01;
+// Launch speeds are clamped below c (gamma <= ~22).
+constexpr double maxLaunchSpeed = 0.999;
 
 } // namespace
 
@@ -37,10 +39,26 @@ double speedRelativeToZamo(const ThreeVector& position, const FourVector& veloci
     return std::sqrt(std::max(1.0 - 1.0 / (gamma * gamma), 0.0));
 }
 
+Photon launchedFromZamo(const ThreeVector& position, const double a, const double sidewaysSpeed)
+{
+    const Metric g {metric(position, a)};
+    FourVector u {zamoVelocity(position, a)};
+    const FourVector phi {0.0, -position[1], position[0], 0.0}; // d_phi
+    const double phiNorm {std::sqrt(dot(g, phi, phi))};
+    if (sidewaysSpeed != 0.0 && phiNorm > 0.0) {
+        const double v {std::clamp(sidewaysSpeed, -maxLaunchSpeed, maxLaunchSpeed)};
+        const double gamma {1.0 / std::sqrt(1.0 - v * v)};
+        for (std::size_t mu {0}; mu < 4; ++mu) {
+            u[mu] = gamma * (u[mu] + v * phi[mu] / phiNorm);
+        }
+    }
+    const FourVector p {lower(g, u)};
+    return Photon {.position = position, .momentum = {p[1], p[2], p[3]}, .pt = p[0]};
+}
+
 Photon fallingFromRest(const ThreeVector& position, const double a)
 {
-    const FourVector p {lower(metric(position, a), zamoVelocity(position, a))};
-    return Photon {.position = position, .momentum = {p[1], p[2], p[3]}, .pt = p[0]};
+    return launchedFromZamo(position, a, 0.0);
 }
 
 ProperTimeStep advanceProperTime(Photon state, const double a, const double tau, const double stopRadius)

@@ -2,10 +2,12 @@
 
 #include "physics/Disk.hpp"
 #include "physics/Kerr.hpp"
+#include "render/BlackHoleRenderer.hpp"
 
 #include <imgui.h>
 #include <imgui_stdlib.h>
 
+#include <cfloat>
 #include <numbers>
 #include <utility>
 
@@ -17,6 +19,12 @@ constexpr std::array<const char*, 4> toneMapperNames {"AgX", "ACES (Hill fit)", 
 constexpr std::array<const char*, 6> debugViewNames {"None", "Step count", "Constraint |H| / p^2",
                                                      "Fate (captured/sky/disk/limit)", "Redshift g (disk)",
                                                      "Magnification (sky)"};
+constexpr float panelWidth = 360.0F;   // at the default font
+constexpr float panelFontSize = 13.0F; // Dear ImGui's default font size
+
+// Indexed by ScreenshotSize.
+constexpr std::array<const char*, 5> screenshotSizeNames {"Window", "1920 x 1080", "2560 x 1440", "3840 x 2160 (4K)",
+                                                          "7680 x 4320 (8K)"};
 // Indexed by Observer.
 constexpr std::array<const char*, 3> observerNames {"Static (ZAMO)", "Orbiting (Keplerian)", "Free fall"};
 // Indexed by Background.
@@ -57,14 +65,27 @@ void drawImageSettings(SceneSettings& settings, const PanelInfo& info)
     if (ImGui::Combo("Tone mapper", &toneMapper, toneMapperNames.data(), static_cast<int>(toneMapperNames.size()))) {
         settings.toneMapper = static_cast<ToneMapper>(toneMapper);
     }
-    ImGui::SliderFloat("Exposure", &settings.exposureEv, -6.0F, 6.0F, "%+.1f EV");
+    ImGui::Checkbox("Refine still image", &settings.refineStill);
+    ImGui::SetItemTooltip("While nothing changes, average frames traced with sub-pixel offsets into an\n"
+                          "anti-aliased image (then stop tracing). Disk turbulence animates, so set the\n"
+                          "Time scale to 0 (or the turbulence to 0) for a still.");
+    ImGui::SameLine();
+    ImGui::TextDisabled("%u / %u", info.accumulatedSamples, BlackHoleRenderer::maxAccumulatedSamples);
+    ImGui::Checkbox("Auto exposure", &settings.autoExposure);
+    ImGui::SetItemTooltip("Meter the image (weighted by brightness) and adapt like a camera; Exposure then\n"
+                          "adds to it. Not physical, but it keeps a blueshifted view from saturating.");
+    ImGui::SliderFloat(settings.autoExposure ? "Exposure comp." : "Exposure", &settings.exposureEv, -6.0F, 6.0F,
+                       "%+.1f EV");
     ImGui::Checkbox("Bloom", &settings.bloomEnabled);
     ImGui::BeginDisabled(!settings.bloomEnabled);
     ImGui::SliderFloat("Bloom strength", &settings.bloomStrength, 0.0F, 0.3F, "%.3f");
     ImGui::EndDisabled();
 }
 
-void drawPerformance(SceneSettings& settings, const PanelInfo& info)
+
+} // namespace
+
+void ControlPanel::drawPerformance(SceneSettings& settings, const PanelInfo& info)
 {
     ImGui::Text("CPU frame %.2f ms (%.0f FPS)", info.frameMilliseconds, info.fps);
     double gpuTotal {0.0};
@@ -74,13 +95,50 @@ void drawPerformance(SceneSettings& settings, const PanelInfo& info)
         gpuTotal += info.gpuMilliseconds[pass];
     }
     ImGui::Text("GPU total    %6.3f ms", gpuTotal);
+    // Applied on release: rescaling while dragging would move the slider under the cursor.
+    if (!m_editingUiScale) {
+        m_uiScaleDraft = settings.uiScale;
+    }
+    ImGui::SliderFloat("UI scale", &m_uiScaleDraft, 0.75F, 3.0F, "%.2f");
+    m_editingUiScale = ImGui::IsItemActive();
+    if (ImGui::IsItemDeactivatedAfterEdit()) {
+        settings.uiScale = m_uiScaleDraft;
+    }
+    ImGui::SetItemTooltip("Size of this panel, on top of the monitor's own scale.");
     ImGui::Checkbox("VSync", &settings.vsync);
     ImGui::SameLine();
     ImGui::TextDisabled("(off to measure)");
     ImGui::TextDisabled("%.*s", static_cast<int>(info.glRenderer.size()), info.glRenderer.data());
 }
 
-} // namespace
+void ControlPanel::drawPresets(const PanelInfo& info, PanelActions& actions)
+{
+    if (ImGui::BeginCombo("Load", "(choose)")) {
+        for (const std::filesystem::path& preset : info.presets) {
+            const std::string name {preset.stem().string()};
+            if (ImGui::Selectable(name.c_str())) {
+                actions.loadPreset = preset;
+            }
+        }
+        ImGui::EndCombo();
+    }
+    ImGui::SameLine();
+    actions.rescanPresets = ImGui::SmallButton("Rescan##presets");
+    const bool enter {ImGui::InputTextWithHint("##name", "name", &m_presetName, ImGuiInputTextFlags_EnterReturnsTrue)};
+    ImGui::SameLine();
+    if (ImGui::Button("Save") || enter) {
+        actions.savePreset = m_presetName;
+    }
+    ImGui::SetItemTooltip("Saves the scene and camera to presets/<name>.preset (a short text file;\n"
+                          "keys left out of a hand-written one take their defaults).");
+    if (!info.presetStatus.empty()) {
+        const ImVec4 color {info.presetError ? ImVec4 {1.0F, 0.4F, 0.4F, 1.0F}
+                                              : ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled)};
+        ImGui::PushStyleColor(ImGuiCol_Text, color);
+        ImGui::TextWrapped("%.*s", static_cast<int>(info.presetStatus.size()), info.presetStatus.data());
+        ImGui::PopStyleColor();
+    }
+}
 
 void ControlPanel::drawCamera(SceneSettings& settings, const PanelInfo& info, PanelActions& actions)
 {
@@ -93,6 +151,13 @@ void ControlPanel::drawCamera(SceneSettings& settings, const PanelInfo& info, Pa
                           "Free fall: dropped from rest where the camera is, falls towards the horizon.\n"
                           "A moving camera sees aberration and Doppler shifts of everything.");
     if (settings.observer == Observer::FREE_FALL) {
+        ImGui::SliderFloat("Sideways speed", &settings.fallSpeed, -0.95F, 0.95F, "%+.3f c");
+        ImGui::SetItemTooltip("Launch speed along the orbit direction, relative to the local ZAMO (+ = with the\n"
+                              "hole's rotation). 0 drops it; at the circular speed it orbits; in between it\n"
+                              "plunges in a spiral; faster than escape it flies off.");
+        if (info.circularSpeed) {
+            ImGui::TextDisabled("Circular speed here %+.3f c", *info.circularSpeed);
+        }
         actions.dropAgain = ImGui::Button("Drop again");
         ImGui::SameLine();
     }
@@ -106,6 +171,10 @@ void ControlPanel::drawCamera(SceneSettings& settings, const PanelInfo& info, Pa
         ImGui::TextWrapped("%.*s", static_cast<int>(info.observerNote.size()), info.observerNote.data());
         ImGui::PopStyleColor();
     }
+    ImGui::BeginDisabled(info.lookCentered);
+    actions.recenterLook = ImGui::Button("Look at the hole (C)");
+    ImGui::EndDisabled();
+    ImGui::SetItemTooltip("Right-drag looks around; this (or a right double click) turns the view back.");
     ImGui::SliderFloat("Time scale", &settings.timeScale, 0.0F, 50.0F, "%.1f M/s", ImGuiSliderFlags_Logarithmic);
     ImGui::SetItemTooltip("M of time per second for everything that moves: disk turbulence, orbiting and\n"
                           "falling cameras (0 = frozen). For a 10 solar-mass hole, 1 M is 49 microseconds.");
@@ -164,7 +233,10 @@ PanelActions ControlPanel::draw(SceneSettings& settings, const PanelInfo& info)
     PanelActions actions {};
 
     ImGui::SetNextWindowPos(ImVec2 {12.0F, 12.0F}, ImGuiCond_FirstUseEver);
-    ImGui::SetNextWindowSize(ImVec2 {360.0F, 0.0F}, ImGuiCond_FirstUseEver);
+    // The width a 13-pixel font needs, scaled with the font (UI scale), whatever imgui.ini remembers.
+    const float width {panelWidth * ImGui::GetFontSize() / panelFontSize};
+    ImGui::SetNextWindowSize(ImVec2 {width, 0.0F}, ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowSizeConstraints(ImVec2 {width, 0.0F}, ImVec2 {FLT_MAX, FLT_MAX});
     if (!ImGui::Begin("Black hole")) {
         ImGui::End();
         return actions;
@@ -176,6 +248,10 @@ PanelActions ControlPanel::draw(SceneSettings& settings, const PanelInfo& info)
         ImGui::TextWrapped("Shader error (previous shaders still active):\n%.*s",
                            static_cast<int>(info.shaderError.size()), info.shaderError.data());
         ImGui::PopStyleColor();
+    }
+
+    if (ImGui::CollapsingHeader("Presets", ImGuiTreeNodeFlags_DefaultOpen)) {
+        drawPresets(info, actions);
     }
 
     if (ImGui::CollapsingHeader("Black hole", ImGuiTreeNodeFlags_DefaultOpen)) {
@@ -233,6 +309,27 @@ PanelActions ControlPanel::draw(SceneSettings& settings, const PanelInfo& info)
         drawImageSettings(settings, info);
     }
 
+    if (ImGui::CollapsingHeader("Screenshot", ImGuiTreeNodeFlags_DefaultOpen)) {
+        actions.screenshot = ImGui::Button("Save PNG (F12)");
+        ImGui::SameLine();
+        int size {std::to_underlying(settings.screenshotSize)};
+        ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x);
+        if (ImGui::Combo("##size", &size, screenshotSizeNames.data(), static_cast<int>(screenshotSizeNames.size()))) {
+            settings.screenshotSize = static_cast<ScreenshotSize>(size);
+        }
+        ImGui::SetItemTooltip("Rendered offscreen at full quality (render scale 1), without the panel,\n"
+                              "into screenshots/ in the source tree. 8K takes a few seconds on an iGPU.");
+        ImGui::SliderInt("Samples", &settings.screenshotSamples, 1, 64, "%d", ImGuiSliderFlags_Logarithmic);
+        ImGui::SetItemTooltip("Jittered frames averaged per screenshot (anti-aliasing); time grows with it.");
+        if (!info.screenshotStatus.empty()) {
+            const ImVec4 color {info.screenshotError ? ImVec4 {1.0F, 0.4F, 0.4F, 1.0F}
+                                                      : ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled)};
+            ImGui::PushStyleColor(ImGuiCol_Text, color);
+            ImGui::TextWrapped("%.*s", static_cast<int>(info.screenshotStatus.size()), info.screenshotStatus.data());
+            ImGui::PopStyleColor();
+        }
+    }
+
     if (ImGui::CollapsingHeader("Performance", ImGuiTreeNodeFlags_DefaultOpen)) {
         drawPerformance(settings, info);
     }
@@ -246,7 +343,7 @@ PanelActions ControlPanel::draw(SceneSettings& settings, const PanelInfo& info)
     ImGui::Separator();
     ImGui::Text("%.0f FPS", info.fps);
     ImGui::SameLine();
-    ImGui::TextDisabled("Drag or wheel click: orbit  Scroll: zoom  F11: fullscreen  Esc: quit");
+    ImGui::TextDisabled("Drag or wheel click: orbit  Right drag: look  Scroll: zoom  F11: fullscreen  F12: screenshot");
 
     ImGui::End();
     return actions;

@@ -44,6 +44,11 @@ private:
     void updateDiskProfile();
     // Starts decoding settings.skyImage on a worker thread when it changes, uploads it when done.
     void updateSkyImage();
+    // Renders the current view offscreen at settings.screenshotSize and saves it as PNG on a worker thread.
+    void takeScreenshot(glm::ivec2 windowSize);
+    void updateScreenshotStatus();
+    void loadPresetFile(const std::filesystem::path& path);
+    void savePresetAs(std::string_view name);
     void reloadShaders();
     void pollShaderFiles(double now);
 
@@ -66,8 +71,11 @@ private:
     bool m_escapeLeftFullscreen {}; // Esc still held after leaving fullscreen: do not also quit
     bool m_reloadKeyWasDown {};
     bool m_middleButtonWasDown {};
+    bool m_rightButtonWasDown {};
+    double m_lastRightPress {-1.0}; // glfwGetTime() of the last right press, for double clicks
     bool m_orbitLatched {}; // toggled by a wheel click: orbit without holding a button
     double m_smoothedFrameSeconds {1.0 / 60.0};
+    double m_frameSeconds {}; // the last frame's wall time
     double m_nextShaderPoll {};
     double m_coordinateTime {}; // animation clock in M, advanced at settings.timeScale
 
@@ -75,6 +83,7 @@ private:
     std::optional<kerr::Photon> m_fall {};
     double m_fallProperTime {};
     float m_fallSpin {};
+    float m_fallSpeed {};
     std::string m_observerNote {};
 
     // Inputs of the disk temperature profile last uploaded; empty before the first upload.
@@ -91,6 +100,16 @@ private:
     std::future<std::expected<SkyImage, std::string>> m_skyLoad {}; // in flight while valid()
     std::string m_skyStatus {};
     bool m_skyError {};
+
+    std::future<std::expected<std::filesystem::path, std::string>> m_screenshotSave {}; // in flight while valid()
+    std::string m_screenshotStatus {};
+    bool m_screenshotError {};
+    bool m_screenshotKeyWasDown {};
+    bool m_screenshotRequested {};
+
+    std::vector<std::filesystem::path> m_presets {};
+    std::string m_presetStatus {};
+    bool m_presetError {};
 };
 
 } // namespace bh

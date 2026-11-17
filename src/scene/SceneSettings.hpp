@@ -11,6 +11,9 @@ namespace bh {
 // What the camera is (physics/Observer.hpp): the frame its image is taken in.
 enum class Observer { STATIC, ORBITING, FREE_FALL };
 
+// Size of a screenshot: the window's, or a fixed one (rendered offscreen, any aspect ratio).
+enum class ScreenshotSize { WINDOW, FULL_HD, QHD, UHD_4K, UHD_8K };
+
 // The background the user picked; an IMAGE is shown once skyImage has loaded.
 enum class Background { NONE, STARS, GRID, IMAGE };
 
@@ -40,6 +43,7 @@ struct SceneSettings {
 
     // Camera
     Observer observer {Observer::STATIC};
+    float fallSpeed {0.0F}; // free fall: sideways launch speed relative to the ZAMO, c (+ prograde); 0 = drop
     float fovDegrees {60.0F};
     // Clock of everything that moves (disk turbulence, orbiting and falling cameras): M per second; 0 = frozen.
     float timeScale {4.0F};
@@ -53,12 +57,19 @@ struct SceneSettings {
 
     // Image
     float renderScale {0.75F}; // trace resolution / window resolution; the tracer is compute-bound
+    bool refineStill {true};   // temporal accumulation while nothing changes
+    bool autoExposure {false}; // metered; exposureEv becomes a compensation on top
     ToneMapper toneMapper {ToneMapper::AGX};
     float exposureEv {0.0F}; // exposure = 2^EV
     bool bloomEnabled {true};
     float bloomStrength {0.04F};
 
+    // Screenshots (F12): always at render scale 1, without the UI, averaging jittered samples
+    ScreenshotSize screenshotSize {ScreenshotSize::WINDOW};
+    int screenshotSamples {16};
+
     // Performance and development
+    float uiScale {1.0F}; // on top of the monitor's content scale (screens that report 1 but are dense)
     bool vsync {true};
     bool fullscreen {false};
     bool autoReloadShaders {true};

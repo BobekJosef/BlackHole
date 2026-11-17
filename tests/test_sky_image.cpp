@@ -1,6 +1,8 @@
-// Sky map loading (bh_assets) on small files written here: formats and pixel values, the
-// equirectangular 2:1 rule, cube-map directories with each naming scheme, and the error messages.
+// Image files (bh_assets) on small files written here: sky map formats and pixel values, the
+// equirectangular 2:1 rule, cube-map directories with each naming scheme, the error messages, and the PNG
+// writer (round trip through the reader, file naming).
 
+#include "assets/PngFile.hpp"
 #include "assets/SkyImage.hpp"
 
 #include <algorithm>
@@ -148,6 +150,32 @@ void testFind(const std::filesystem::path& dir)
     expect(std::ranges::is_sorted(found), "sorted");
 }
 
+void testPngWriter(const std::filesystem::path& dir)
+{
+    // 4x2 so the reader takes it as an equirectangular map; every pixel distinct, rows top first.
+    bh::RgbaImage image {.width = 4, .height = 2, .pixels = {}};
+    for (int i {0}; i < 8; ++i) {
+        image.pixels.insert(image.pixels.end(), {static_cast<std::uint8_t>(30 * i), static_cast<std::uint8_t>(7 * i),
+                                                 static_cast<std::uint8_t>(255 - 30 * i), 255});
+    }
+    const std::filesystem::path path {dir / "shots" / "round_trip.png"};
+    expect(bh::writePng(path, image).has_value(), "PNG written (missing directory created)");
+    const auto read {bh::loadSkyImage(path)};
+    expect(read.has_value() && !read->faces.front().isHdr(), "and read back");
+    if (read && !read->faces.front().isHdr()) {
+        expect(std::get<std::vector<std::uint8_t>>(read->faces.front().pixels) == image.pixels,
+               "pixels survive the round trip, top row first");
+    }
+    expect(!bh::writePng(dir / "bad.png", bh::RgbaImage {.width = 3, .height = 3, .pixels = {1, 2, 3}}),
+           "a pixel count that does not match the size is rejected");
+
+    const std::filesystem::path first {bh::timestampedPath(dir / "shots", "blackhole")};
+    expect(first.extension() == ".png" && first.filename().string().starts_with("blackhole_"), "timestamped name");
+    expect(bh::writePng(first, image).has_value(), "written");
+    const std::filesystem::path second {bh::timestampedPath(dir / "shots", "blackhole")};
+    expect(second != first, "never overwrites: a suffix when the name is taken");
+}
+
 } // namespace
 
 int main()
@@ -157,6 +185,7 @@ int main()
     testHdr(dir.path());
     testCubeMap(dir.path());
     testFind(dir.path());
+    testPngWriter(dir.path());
 
     if (g_failures != 0) {
         std::cerr << g_failures << " check(s) failed\n";

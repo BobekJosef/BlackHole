@@ -192,7 +192,7 @@ Follow-ups:
 - [ ] Einstein ring check against an exact strong-field lens equation (Stage 2 left-over), now that the
       magnification view shows it.
 
-## Stage 6 — Interactivity
+## Stage 6 — Interactivity ✅
 
 The frame rate is fine (60+ FPS on an iGPU at the defaults), so this stage is about what you can do,
 not speed.
@@ -214,13 +214,39 @@ not speed.
     fell through the horizon at a fast time scale).
   - One clock for everything that moves (*Time scale* in the Camera section): disk turbulence and the
     orbiting camera in coordinate time, the falling camera in its proper time.
-- [ ] Screenshot (`stb_image_write` PNG of the rendered frame, optionally at a higher offline resolution).
-- [ ] Save/load settings presets (camera + scene), HiDPI-aware ImGui scaling.
-- [ ] Look around while falling or orbiting (the view is fixed on the hole now), and a free-fall start
-      with angular momentum (plunging spirals).
-- [ ] Auto exposure: a falling camera sees the disk blueshifted to saturation near the horizon.
-- [ ] **Temporal accumulation** (quality, not speed): when nothing changes, jitter sub-pixel ray origins
-      and average frames into a converged, anti-aliased still.
+- [x] **Screenshots** (F12 or the panel): the frame rendered again offscreen at render scale 1 and at the
+      window's size or a fixed one up to 8K (`BlackHoleRenderer::renderImage`: same passes into an RGBA8
+      FBO, read back), without the UI, encoded by `stb_image_write` on a worker thread into
+      `screenshots/` (git-ignored), timestamped, never overwriting. Tested: PNG round trip.
+- [x] **Presets** (`scene/Preset.hpp`, library `bh_presets`): scene + camera placement as `key = value`
+      text, one field table for writing, reading and defaults; keys left out take their defaults,
+      machine/session settings (VSync, render scale, accuracy, debug views) survive a load; values range-
+      checked like the sliders, errors and warnings name the line. Six built-in presets in `presets/`
+      (edge-on, face-on, lensing-grid, milky-way, orbiting, plunge); a test loads each of them, so they
+      cannot rot as fields change.
+- [x] HiDPI: the panel scales by the monitor's content scale (GLFW) times a *UI scale* setting (for dense
+      screens that report 1); the font is re-rasterised at each size, so it stays sharp, and the panel's
+      minimum width follows the font.
+- [x] Look around (right drag, every camera mode; a right double click, C or the panel looks back at the hole): yaw and pitch on
+      top of the direction the mode points in, saved in presets (`camera.look_yaw`, `camera.look_pitch`).
+      The analytic shadow overlay hides while looking away (it assumes the hole at the centre).
+- [x] Free fall with a sideways launch (*Sideways speed*): u = γ(u_ZAMO + v e_φ) (`kerr::launchedFromZamo`).
+      0 drops it, the local circular speed (shown) orbits, in between it plunges in a spiral, faster than
+      escape it leaves (stopped at 1000 M). Tested: a launch at the circular speed is the Keplerian
+      observer and stays on its circle; a slower one spirals to the horizon with L_z conserved.
+- [x] **Auto exposure** (`exposure.comp`, not physical: a camera's metering): mipmaps of the radiance, one
+      16×16 work group samples a 64×64 grid on a ~64-texel mip, metered value the luminance-weighted mean
+      ΣL²/ΣL (the disk drives it, not the black sky), eased to `key / metered` with τ = 0.4 s; the manual EV
+      becomes a compensation. Key 0.7 = what the default scene meters, so it looks as at a fixed 0 EV.
+      0.19 ms. The falling camera no longer saturates at the horizon.
+- [x] **Temporal accumulation** (*Refine still image*): the trace jitters its rays (Halton 2, 3) and folds
+      each frame into a running mean (rgba32f, in `trace.comp` itself) while the frame uniforms are
+      unchanged (`FrameUniforms::operator==`; exposure, tone mapping and bloom come after and do not
+      reset it). After 256 samples the trace is skipped: the GPU idles on a still view (trace 0.004 ms).
+      The turbulence clock is zeroed when no turbulence is drawn, so static scenes converge while time
+      runs. Screenshots average *Samples* jittered frames (16 by default). A separate accumulate pass
+      reading rgba32f first made bloom 0.26 → 0.85 ms; folding it into the trace costs nothing
+      measurable (12.70 vs 12.68 ms).
 
 Later, only if the frame rate ever needs it: adaptive resolution while the camera moves; early ray
 termination and a tighter `r_escape`; work-group size, register pressure and divergence profiling.

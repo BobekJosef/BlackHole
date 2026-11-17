@@ -23,6 +23,11 @@ target_link_libraries(test_sky_image PRIVATE bh_assets)
 blackhole_configure_target(test_sky_image)
 add_test(NAME sky_image COMMAND test_sky_image)
 
+add_executable(test_preset test_preset.cpp)
+target_link_libraries(test_preset PRIVATE bh_presets)
+blackhole_configure_target(test_preset)
+add_test(NAME preset COMMAND test_preset "${PROJECT_SOURCE_DIR}/presets")
+
 add_executable(test_shader_preprocessor test_shader_preprocessor.cpp)
 target_link_libraries(test_shader_preprocessor PRIVATE bh_shadertools)
 blackhole_configure_target(test_shader_preprocessor)

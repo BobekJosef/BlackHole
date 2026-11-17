@@ -1,0 +1,7 @@
+# No disk, a coordinate grid on the sky: the Einstein ring, the mirrored secondary image and frame
+# dragging twisting the meridians. Try the Magnification debug view with it.
+spin = 0.9
+disk.enabled = false
+sky.background = grid
+camera.polar = 86
+camera.distance = 22

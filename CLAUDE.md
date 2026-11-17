@@ -13,9 +13,11 @@ gravitational, frame dragging; `common/disk.glsl`); escaped rays see stars, a gr
 with a ray differential shared through the work group (`common/sky.glsl`). Next: Stage 6 (interactivity
 and performance).
 
-A frame is three GPU passes (`BlackHoleRenderer`): **trace** (compute, one ray per pixel at
-`renderScale` × window size → HDR radiance image) → **bloom** (compute down/up-sampling chain) →
-**present** (fragment: up-scale, bloom mix, exposure, tone mapping, sRGB). ImGui draws on top.
+A frame is a few GPU passes (`BlackHoleRenderer`): **trace** (compute, one jittered ray per pixel at
+`renderScale` × window size, folded into a running mean while the frame uniforms do not change → HDR
+radiance image; skipped once 256 samples have converged) → **exposure** (with auto exposure: mipmaps and
+one metering work group) → **bloom** (compute down/up-sampling chain) → **present** (fragment: up-scale,
+bloom mix, exposure, tone mapping, sRGB). ImGui draws on top. Screenshots run the same passes offscreen.
 
 Stack: C++23, CMake ≥ 3.25, OpenGL 4.3 core, GLFW 3.4, GLAD 2 (vendored), GLM 1.0, Dear ImGui 1.91,
 stb_image.
@@ -45,6 +47,8 @@ a wrapper shell, so `kill` leaves the window open), kill it, and confirm with `p
   in its README).
 - Sky maps live in `assets/` (`config::assetDir`), git-ignored except its README; `scripts/download_sky_maps.sh`
   fetches the default one. Never commit images.
+- A new `SceneSettings` field that describes the scene (not the machine or the session) gets a line in
+  `visitFields` in `scene/Preset.cpp`, with the slider's range, so presets save and load it.
 - Linux needs the X11 headers for GLFW: `libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev`,
   and `libgl-dev`. GLFW's Wayland backend is off by default (`-DGLFW_BUILD_WAYLAND=ON` enables it).
 - Shaders are read at run time from the source tree (`config::shaderDir`, generated into
@@ -71,7 +75,8 @@ src/gfx/       thin OpenGL/GLFW wrappers: Window, GlObject (RAII names), ShaderP
                ShaderPreprocessor (GLSL #include; no GL, so its own bh_shadertools library, unit-tested)
 src/render/    BlackHoleRenderer (the passes), FrameParams (CPU-side frame description),
                FrameUniforms (std140 mirror of shaders/common/frame.glsl), GpuPass (timed sections)
-src/scene/     OrbitCamera, SceneSettings (what the UI edits)
+src/scene/     OrbitCamera, SceneSettings (what the UI edits); Preset (bh_presets, no GL, unit-tested:
+               key = value files; its field table in Preset.cpp lists what a preset contains)
 src/ui/        ImGuiLayer (context + backends), ControlPanel (a class: it keeps the path text field)
 src/app/       Application: owns everything, runs the frame loop
 shaders/       main shaders: trace.comp, bloom_*.comp, fullscreen.vert + present.frag
@@ -79,6 +84,8 @@ shaders/common/ shared GLSL headers: frame (UBO), kerr (geodesics), disk (redshi
                color (tone mapping, sRGB), sky (stars, grid, maps; footprint filtering), random
 tests/         CTest executables (bh_physics, bh_shadertools, bh_assets; no GL context in tests) + GLSL validation
 assets/        sky maps, git-ignored (README.md lists sources and licences)
+presets/       built-in presets (tests/test_preset.cpp loads every one: keep them warning-free)
+screenshots/   F12 output, git-ignored
 scripts/       download_sky_maps.sh
 external/glad/ vendored loader
 ```
@@ -141,6 +148,10 @@ is converted to GPU quantities in one place (`Application::frameParams`).
   locals `camelCase` as in C++. GLSL `#define` only for include guards.
 - Per-frame scene data goes in the `Frame` UBO (binding 0); a new field changes `common/frame.glsl` and
   `FrameUniforms.hpp` together, with a new `static_assert`. Pass-specific knobs stay plain uniforms.
+- Anything the trace depends on must reach it through `FrameUniforms` (or reset the accumulation
+  explicitly, as new textures and shader reloads do): equal uniforms are taken to mean "same image" and
+  the frames are averaged. Present-only knobs (exposure, tone mapping, bloom) stay plain uniforms.
+- Work-group sizes are literals: `layout(local_size_x = N)` with a named constant needs GLSL 4.40.
 - Compute shaders use 8×8 work groups (`workGroupSize` in the renderer) and return early outside the image,
   except `trace.comp`, whose invocations must all reach its `barrier()` (they skip the work instead).
   After a dispatch that writes an image, `glMemoryBarrier` before anything reads it.

@@ -28,7 +28,15 @@
 layout(local_size_x = 8, local_size_y = 8) in; // workGroupSize in BlackHoleRenderer.cpp
 const int GROUP_SIZE = 8;
 
-layout(r11f_g11f_b10f, binding = 0) uniform writeonly image2D uRadiance;
+layout(r11f_g11f_b10f, binding = 0) uniform writeonly image2D uRadiance; // what is shown: the running mean
+layout(rgba32f, binding = 1) uniform image2D uAverage;                   // the running mean at full precision
+
+// Temporal accumulation: while nothing the trace depends on changes, each frame traces with a new sub-pixel
+// offset and folds into the running mean, average += (new - average) / (n + 1), which converges to an
+// anti-aliased still. 32-bit floats for the mean: it adds increments of 1/n of itself.
+uniform vec2 uJitter;       // sub-pixel offset of this frame's rays, in pixels
+uniform uint uSampleIndex;  // n: frames already in uAverage (0 starts over)
+uniform bool uAccumulate;   // keep uAverage up to date
 
 const int FATE_CAPTURED = 0;
 const int FATE_ESCAPED = 1;
@@ -71,7 +79,7 @@ vec3 pixelDirection(vec2 pixel)
 
 Ray traceRay(ivec2 pixel)
 {
-    vec4 p4 = uCameraFrame * vec4(-1.0, pixelDirection(vec2(pixel) + 0.5));
+    vec4 p4 = uCameraFrame * vec4(-1.0, pixelDirection(vec2(pixel) + 0.5 + uJitter));
     Ray ray;
     ray.fate = FATE_STEP_LIMIT;
     ray.steps = 0u;
@@ -220,9 +228,10 @@ void main()
     }
     // Magnification mu = (camera solid angle of the pixel) / (sky solid angle it sees); capped at
     // 1000 where the footprint degenerates (on the critical curve mu is infinite for a point).
-    vec3 n = pixelDirection(vec2(pixel) + 0.5);
-    float pixelSolidAngle = length(cross(pixelDirection(vec2(pixel) + vec2(1.5, 0.5)) - n,
-                                         pixelDirection(vec2(pixel) + vec2(0.5, 1.5)) - n));
+    vec2 centre = vec2(pixel) + 0.5 + uJitter;
+    vec3 n = pixelDirection(centre);
+    float pixelSolidAngle = length(cross(pixelDirection(centre + vec2(1.0, 0.0)) - n,
+                                         pixelDirection(centre + vec2(0.0, 1.0)) - n));
     float skyArea = max(length(cross(jx, jy)), 1.0e-3 * pixelSolidAngle);
 
     // Front to back: the first disk crossing, light picked up behind it, then the sky, each attenuated by
@@ -272,5 +281,12 @@ void main()
     // stored as Inf, which the bloom's Karis average turns into NaN squares. Physically such a pixel is
     // simply saturated.
     const float HDR_MAX = 64512.0;
-    imageStore(uRadiance, pixel, vec4(min(radiance, vec3(HDR_MAX)), 1.0));
+    radiance = min(radiance, vec3(HDR_MAX));
+    if (uAccumulate) {
+        if (uSampleIndex > 0u) {
+            radiance = mix(imageLoad(uAverage, pixel).rgb, radiance, 1.0 / float(uSampleIndex + 1u));
+        }
+        imageStore(uAverage, pixel, vec4(radiance, 1.0));
+    }
+    imageStore(uRadiance, pixel, vec4(radiance, 1.0));
 }

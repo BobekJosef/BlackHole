@@ -16,6 +16,12 @@ uniform int   uToneMapper;      // TONE_MAPPER_*
 uniform bool  uBloomEnabled;
 uniform float uBloomStrength;   // fraction of energy moved into the blur, 0..1
 uniform float uBloomNormalization; // 1 / number of bloom levels summed by the up-sampling chain
+uniform bool  uAutoExposure;    // multiply by the metered exposure (exposure.comp)
+
+layout(std430, binding = 1) readonly buffer Exposure {
+    float logExposure;
+    float meteredLuminance;
+};
 
 layout(location = 0) out vec4 outColor;
 
@@ -27,7 +33,8 @@ void main()
         // Energy-conserving: a fraction of the light is spread out, none is added.
         color = mix(color, uBloomNormalization * texture(uBloom, uv).rgb, uBloomStrength);
     }
-    vec3 encoded = linearToSrgb(toneMap(uExposure * color, uToneMapper));
+    float exposure = uAutoExposure ? uExposure * exp2(logExposure) : uExposure;
+    vec3 encoded = linearToSrgb(toneMap(exposure * color, uToneMapper));
     encoded += (hash33(vec3(gl_FragCoord.xy, 0.0)).x - 0.5) / 255.0; // dither against 8-bit banding
     outColor = vec4(encoded, 1.0);
 }
